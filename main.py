@@ -13,22 +13,23 @@ TIMING = (280, 515, 515, 745)
 NUM_LEDS = 10
 led = NeoPixel(Pin(16), NUM_LEDS, timing=TIMING)
 
-# ===== 설정 =====
-TH_IDLE    = 8000    # 이 이하면 가스 없음 (평상시)
-TH_COOK    = 12000   # 이 이상이면 요리 시작 감지
-TH_WARN    = 30000   # 주의
-TH_DANGER  = 45000   # 위험
+# ===== 임계값 (웹에서 조절 가능) =====
+TH_IDLE   = 7000
+TH_COOK   = 10000
+TH_WARN   = 30000
+TH_DANGER = 45000
 
 # ===== 상태 변수 =====
-timer_duration  = 10 * 60  # 기본 타이머: 10분 (초 단위)
-timer_start     = 0        # 타이머 시작 시각 (ticks_ms)
-timer_running   = False    # 타이머 작동 중 여부
-cooking         = False    # 요리 중 여부
-last_gas        = 0        # 마지막 가스 수치
-last_discord    = 0        # 마지막 디스코드 알림
-last_sensor     = 0        # 마지막 센서 읽기
-DISCORD_COOL    = 60000    # 위험 알림 쿨다운 60초
-idle_count      = 0        # 가스 없음 카운트 (요리 종료 판단용)
+timer_duration      = 600
+timer_start         = 0
+timer_running       = False
+cooking             = False
+last_gas            = 0
+last_sensor         = 0
+last_discord        = 0
+idle_count          = 0
+timer_done_notified = False
+DISCORD_COOL        = 60000
 
 # ===== LED =====
 def clear_led():
@@ -36,68 +37,40 @@ def clear_led():
         led[i] = (0, 0, 0)
     led.write()
 
-def led_breathe_green():
-    """평상시: 초록 숨쉬기"""
+def update_led():
+    global timer_running, timer_start, timer_duration
+    if last_gas >= TH_DANGER:
+        b = (time.ticks_ms() // 80) % 2
+        for i in range(NUM_LEDS):
+            led[i] = (80, 0, 0) if b else (0, 0, 0)
+        led.write()
+        return
+    if timer_running:
+        elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000
+        remaining = max(0, timer_duration - elapsed)
+        if remaining <= 0:
+            b = (time.ticks_ms() // 300) % 2
+            for i in range(NUM_LEDS):
+                led[i] = (60, 0, 0) if b else (0, 0, 0)
+        elif remaining <= 60:
+            b = (time.ticks_ms() // 400) % 2
+            for i in range(NUM_LEDS):
+                led[i] = (50, 25, 0) if b else (0, 0, 0)
+        else:
+            ratio  = elapsed / timer_duration
+            on_cnt = max(0, int(NUM_LEDS * (1 - ratio)))
+            for i in range(NUM_LEDS):
+                led[i] = (0, 0, 40) if i < on_cnt else (0, 0, 0)
+        led.write()
+        return
+    # 평상시 초록 숨쉬기
     t = time.ticks_ms()
-    # 3초 주기로 밝기 0~30 왔다갔다
-    brightness = int((1 + __import__('math').sin(t / 500)) * 15)
+    brightness = int((t % 3000) / 3000 * 30)
+    if (t % 6000) >= 3000:
+        brightness = 30 - brightness
     for i in range(NUM_LEDS):
         led[i] = (0, brightness, 0)
     led.write()
-
-def led_timer_progress(elapsed, total):
-    """타이머 진행: 파란색 LED가 하나씩 꺼짐"""
-    ratio = elapsed / total
-    on_count = max(0, int(NUM_LEDS * (1 - ratio)))  # 남은 시간만큼 켜짐
-    for i in range(NUM_LEDS):
-        led[i] = (0, 0, 40) if i < on_count else (0, 0, 0)
-    led.write()
-
-def led_timer_warning():
-    """타이머 임박: 노란색 깜빡"""
-    b = (time.ticks_ms() // 400) % 2
-    for i in range(NUM_LEDS):
-        led[i] = (50, 25, 0) if b else (0, 0, 0)
-    led.write()
-
-def led_timer_done():
-    """타이머 종료: 빨간색 깜빡"""
-    b = (time.ticks_ms() // 300) % 2
-    for i in range(NUM_LEDS):
-        led[i] = (60, 0, 0) if b else (0, 0, 0)
-    led.write()
-
-def led_danger():
-    """위험 감지: 빨간색 빠르게 번쩍"""
-    b = (time.ticks_ms() // 80) % 2
-    for i in range(NUM_LEDS):
-        led[i] = (80, 0, 0) if b else (0, 0, 0)
-    led.write()
-
-def update_led():
-    """상태에 따라 LED 자동 선택"""
-    global timer_running, timer_start, timer_duration, cooking
-
-    # 위험 감지 최우선
-    if last_gas >= TH_DANGER:
-        led_danger()
-        return
-
-    # 타이머 작동 중
-    if timer_running:
-        elapsed = time.ticks_diff(time.ticks_ms(), timer_start) / 1000
-        remaining = timer_duration - elapsed
-
-        if remaining <= 0:
-            led_timer_done()
-        elif remaining <= 60:  # 1분 이하면 임박
-            led_timer_warning()
-        else:
-            led_timer_progress(elapsed, timer_duration)
-        return
-
-    # 평상시
-    led_breathe_green()
 
 # ===== 디스코드 =====
 def discord_send(title, desc, color):
@@ -120,32 +93,20 @@ def discord_send(title, desc, color):
         print(f"디스코드 실패: {e}")
 
 def discord_timer_start():
-    mins = timer_duration // 60
-    secs = timer_duration % 60
-    t = f"{mins}분" if secs == 0 else f"{mins}분 {secs}초"
-    discord_send(
-        "🍳 요리 시작!",
-        f"가스레인지 감지!\n타이머: **{t}** 시작됩니다.",
-        0x3498DB  # 파랑
-    )
+    m = timer_duration // 60
+    s = timer_duration % 60
+    t = f"{m}분" if s == 0 else f"{m}분 {s}초"
+    discord_send("🍳 요리 시작!", f"가스레인지 감지!\n타이머: **{t}** 시작!", 0x3498DB)
 
 def discord_timer_done():
-    discord_send(
-        "⏰ 타이머 종료!",
-        "요리 타이머가 끝났습니다!\n**가스레인지를 확인하세요!**",
-        0xE67E22  # 주황
-    )
+    discord_send("⏰ 타이머 종료!", "요리 타이머 끝!\n**가스레인지를 확인하세요!**", 0xE67E22)
 
 def discord_danger(value):
     global last_discord
     now = time.ticks_ms()
     if time.ticks_diff(now, last_discord) < DISCORD_COOL:
         return
-    discord_send(
-        "🚨 위험! 가스 감지!",
-        f"위험 수치 감지!\n수치: **{value} / 65535**\n즉시 환기하세요!",
-        0xFF0000  # 빨강
-    )
+    discord_send("🚨 위험! 가스 감지!", f"위험 수치: **{value} / 65535**\n즉시 환기하세요!", 0xFF0000)
     last_discord = now
 
 # ===== Wi-Fi =====
@@ -190,99 +151,137 @@ h1{text-align:center;font-size:22px;padding:12px;color:#f90}
 .b3{background:#0a1a3d;color:#48f}
 .b4{background:#3d2000;color:#f90}
 @keyframes p{50%{opacity:.5}}
+.box{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;
+     padding:18px;max-width:620px;margin:12px auto}
+.box h2{color:#aaa;margin-bottom:14px;font-size:15px}
+.big-timer{font-size:52px;font-weight:bold;color:#fff;
+           text-align:center;font-variant-numeric:tabular-nums;margin:10px 0}
 """
 
-H2 = b""".timer-box{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;
-           padding:20px;max-width:600px;margin:12px auto;text-align:center}
-.timer-box h2{color:#f90;margin-bottom:15px;font-size:16px}
-.big-timer{font-size:52px;font-weight:bold;color:#fff;
-           font-variant-numeric:tabular-nums;margin:10px 0}
-.prog-outer{height:18px;background:#1a1a2e;border-radius:9px;
-            overflow:hidden;margin:10px 0}
-.prog-inner{height:100%;border-radius:9px;transition:width .5s}
+H2 = b""".prog-o{height:18px;background:#1a1a2e;border-radius:9px;overflow:hidden;margin:10px 0}
+.prog-i{height:100%;border-radius:9px;transition:width .5s}
 .dots{display:flex;justify-content:center;gap:5px;margin:10px 0}
 .dot{width:16px;height:16px;border-radius:50%;background:#1a1a2e;border:1px solid #333}
-.d-green{background:#0c0;box-shadow:0 0 5px #0c0}
-.d-blue{background:#48f;box-shadow:0 0 5px #48f}
-.d-yellow{background:#fa0;box-shadow:0 0 5px #fa0}
-.d-red{background:#f22;box-shadow:0 0 5px #f22}
-"""
-
-H3 = b""".set-box{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;
-         padding:20px;max-width:600px;margin:12px auto}
-.set-box h2{color:#aaa;margin-bottom:15px;font-size:15px}
+.d-g{background:#0c0;box-shadow:0 0 5px #0c0}
+.d-b{background:#48f;box-shadow:0 0 5px #48f}
+.d-y{background:#fa0;box-shadow:0 0 5px #fa0}
+.d-r{background:#f22;box-shadow:0 0 5px #f22}
 .row{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}
-.row label{color:#888;font-size:13px;min-width:80px}
-input[type=range]{flex:1;min-width:150px;accent-color:#f90}
+.row label{color:#888;font-size:13px;min-width:120px}
+input[type=range]{flex:1;min-width:120px;accent-color:#f90}
 input[type=number]{background:#1a1a2e;border:1px solid #333;color:#fff;
-                   padding:4px 8px;border-radius:6px;width:70px;font-size:14px}
-.btn{padding:10px 24px;border:none;border-radius:8px;font-size:14px;
-     font-weight:bold;cursor:pointer;transition:.2s}
-.btn-apply{background:#f90;color:#000}
-.btn-apply:hover{background:#ffa}
-.btn-stop{background:#f44;color:#fff;margin-left:8px}
-.btn-stop:hover{background:#f88}
-.gas-bar-o{height:16px;background:#1a1a2e;border-radius:8px;overflow:hidden;margin:8px 0}
-.gas-bar-i{height:100%;border-radius:8px;transition:width .3s}
-.ch{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;
-    padding:12px;max-width:600px;margin:12px auto}
+                   padding:4px 8px;border-radius:6px;width:80px;font-size:14px}
+.btn{padding:9px 20px;border:none;border-radius:8px;font-size:14px;
+     font-weight:bold;cursor:pointer;transition:.2s;margin:3px}
+.btn-o{background:#f90;color:#000}.btn-o:hover{background:#ffb84d}
+.btn-r{background:#f44;color:#fff}.btn-r:hover{background:#f88}
+.btn-b{background:#48f;color:#fff}.btn-b:hover{background:#88f}
+.msg{font-size:13px;margin-top:8px;min-height:18px}
+.bar-o{height:14px;background:#1a1a2e;border-radius:7px;overflow:hidden;margin:6px 0}
+.bar-i{height:100%;border-radius:7px;transition:width .3s}
+.sep{border:none;border-top:1px solid #2a2a3a;margin:14px 0}
+.cur-val{font-size:12px;color:#888;margin-left:6px}
 </style></head><body>
 <h1>🍳 요리 안전 도우미</h1>
 """
 
-H4 = b"""<div class="r">
+H3 = b"""<div class="r">
 <div class="c"><div class="lb">가스 수치</div>
   <div class="v" id="gV">--</div></div>
 <div class="c"><div class="lb">상태</div>
   <div style="margin:6px"><span class="badge b0" id="sB">대기중</span></div></div>
-<div class="c"><div class="lb">타이머</div>
+<div class="c"><div class="lb">남은 시간</div>
   <div class="v" style="color:#48f" id="tS">--:--</div></div>
 </div>
 
-<div class="timer-box">
-<h2>⏱ 타이머</h2>
+<div class="box">
+<h2 style="text-align:center;color:#f90">⏱ 타이머</h2>
 <div class="big-timer" id="bigT">--:--</div>
-<div class="prog-outer"><div class="prog-inner" id="pI" style="width:0%;background:#48f"></div></div>
+<div class="prog-o"><div class="prog-i" id="pI" style="width:0%;background:#48f"></div></div>
 <div class="dots" id="dts">
-<div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
-<div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+<div class="dot"></div><div class="dot"></div><div class="dot"></div>
+<div class="dot"></div><div class="dot"></div><div class="dot"></div>
+<div class="dot"></div><div class="dot"></div><div class="dot"></div>
+<div class="dot"></div>
 </div>
 </div>
+"""
 
-<div class="set-box">
+H4 = b"""<div class="box">
 <h2>⚙️ 타이머 설정</h2>
 <div class="row">
   <label>분</label>
   <input type="range" id="minR" min="1" max="60" value="10"
-         oninput="document.getElementById('minN').value=this.value">
+    oninput="minN.value=this.value">
   <input type="number" id="minN" value="10" min="1" max="60"
-         oninput="document.getElementById('minR').value=this.value">
+    oninput="minR.value=this.value">
 </div>
 <div class="row">
   <label>초</label>
   <input type="range" id="secR" min="0" max="59" value="0"
-         oninput="document.getElementById('secN').value=this.value">
+    oninput="secN.value=this.value">
   <input type="number" id="secN" value="0" min="0" max="59"
-         oninput="document.getElementById('secR').value=this.value">
+    oninput="secR.value=this.value">
 </div>
-<div class="row" style="margin-top:12px">
-  <button class="btn btn-apply" onclick="applyTimer()">✅ 적용</button>
-  <button class="btn btn-stop" onclick="stopTimer()">⏹ 타이머 중지</button>
+<div>
+  <button class="btn btn-o" onclick="applyTimer()">✅ 타이머 적용</button>
+  <button class="btn btn-r" onclick="stopTimer()">⏹ 중지</button>
 </div>
-<div id="applyMsg" style="color:#4f4;font-size:13px;margin-top:8px"></div>
-</div>
-
-<div class="set-box">
-<h2>📊 가스 레벨</h2>
-<div class="gas-bar-o"><div class="gas-bar-i" id="gBI" style="width:0%;background:#4f4"></div></div>
+<div class="msg" id="timerMsg"></div>
 </div>
 
-<div class="ch"><canvas id="gC"></canvas></div>
+<div class="box">
+<h2>🎚️ 감지 임계값 설정</h2>
+<div class="row">
+  <label>가스없음 기준<span class="cur-val" id="idleV">7000</span></label>
+  <input type="range" id="idleR" min="1000" max="20000" step="500" value="7000"
+    oninput="idleV.textContent=this.value;idleN.value=this.value">
+  <input type="number" id="idleN" value="7000" min="1000" max="20000"
+    oninput="idleR.value=this.value;idleV.textContent=this.value">
+</div>
+<div class="row">
+  <label>요리감지 기준<span class="cur-val" id="cookV">10000</span></label>
+  <input type="range" id="cookR" min="1000" max="40000" step="500" value="10000"
+    oninput="cookV.textContent=this.value;cookN.value=this.value">
+  <input type="number" id="cookN" value="10000" min="1000" max="40000"
+    oninput="cookR.value=this.value;cookV.textContent=this.value">
+</div>
+<div class="row">
+  <label>주의 기준<span class="cur-val" id="warnV">30000</span></label>
+  <input type="range" id="warnR" min="5000" max="60000" step="500" value="30000"
+    oninput="warnV.textContent=this.value;warnN.value=this.value">
+  <input type="number" id="warnN" value="30000" min="5000" max="60000"
+    oninput="warnR.value=this.value;warnV.textContent=this.value">
+</div>
+<div class="row">
+  <label>위험 기준<span class="cur-val" id="dangerV">45000</span></label>
+  <input type="range" id="dangerR" min="10000" max="65000" step="500" value="45000"
+    oninput="dangerV.textContent=this.value;dangerN.value=this.value">
+  <input type="number" id="dangerN" value="45000" min="10000" max="65000"
+    oninput="dangerR.value=this.value;dangerV.textContent=this.value">
+</div>
+<div>
+  <button class="btn btn-b" onclick="applyThresh()">✅ 임계값 적용</button>
+</div>
+<div class="msg" id="threshMsg"></div>
+</div>
 """
 
-H5 = b"""<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+H5 = b"""<div class="box">
+<h2>📊 가스 레벨</h2>
+<div class="bar-o"><div class="bar-i" id="gBI" style="width:0%;background:#4f4"></div></div>
+<div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:3px">
+  <span>0</span><span id="thC" style="color:#fa0">요리</span>
+  <span id="thW" style="color:#fa0">주의</span>
+  <span id="thD" style="color:#f44">위험</span><span>65535</span>
+</div>
+</div>
+<div class="box"><canvas id="gC"></canvas></div>
+"""
+
+H6 = b"""<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let L=[],D=[],mx=0,ts=0,tc=0;
+let L=[],D=[],mx=0,curTH={idle:7000,cook:10000,warn:30000,danger:45000};
 const ch=new Chart(document.getElementById('gC'),{
 type:'line',data:{labels:L,datasets:[{data:D,
 borderColor:'#f90',backgroundColor:'rgba(255,150,0,.1)',
@@ -297,26 +296,26 @@ function fmt(s){
   let sc=Math.floor(Math.max(0,s)%60);
   return String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0')}
 
-function updateDots(state, ratio){
+function updateDots(state,ratio){
   let ds=document.querySelectorAll('.dot');
   let bl=Date.now()%600<300;
   ds.forEach((d,i)=>{
     d.className='dot';
-    if(state==='idle') d.classList.add('d-green');
+    if(state==='idle') d.classList.add('d-g');
     else if(state==='running'){
       let n=Math.round((1-ratio)*10);
-      if(i<n) d.classList.add('d-blue');
+      if(i<n) d.classList.add('d-b');
     } else if(state==='warning'){
-      if(bl) d.classList.add('d-yellow');
+      if(bl) d.classList.add('d-y');
     } else if(state==='done'||state==='danger'){
-      if(bl) d.classList.add('d-red');
+      if(bl) d.classList.add('d-r');
     }
   });
 }
 
 async function applyTimer(){
-  let m=parseInt(document.getElementById('minN').value)||0;
-  let s=parseInt(document.getElementById('secN').value)||0;
+  let m=parseInt(minN.value)||0;
+  let s=parseInt(secN.value)||0;
   let total=m*60+s;
   if(total<=0){alert('시간을 설정해주세요!');return;}
   try{
@@ -324,17 +323,40 @@ async function applyTimer(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({duration:total})});
     let j=await r.json();
-    document.getElementById('applyMsg').textContent=
-      j.ok?'✅ 적용됨! 가스 감지 시 자동 시작':'❌ 실패';
-    setTimeout(()=>document.getElementById('applyMsg').textContent='',3000);
+    let msg=document.getElementById('timerMsg');
+    msg.style.color=j.ok?'#4f4':'#f44';
+    msg.textContent=j.ok?'✅ 적용! 가스 감지 시 자동 시작':'❌ 실패';
+    setTimeout(()=>msg.textContent='',3000);
   }catch(e){console.error(e);}
 }
 
 async function stopTimer(){
   try{
     await fetch('/stop_timer',{method:'POST'});
-    document.getElementById('applyMsg').textContent='⏹ 타이머 중지됨';
-    setTimeout(()=>document.getElementById('applyMsg').textContent='',3000);
+    let msg=document.getElementById('timerMsg');
+    msg.style.color='#f44';
+    msg.textContent='⏹ 타이머 중지됨';
+    setTimeout(()=>msg.textContent='',3000);
+  }catch(e){console.error(e);}
+}
+
+async function applyThresh(){
+  let data={
+    idle:parseInt(idleN.value),
+    cook:parseInt(cookN.value),
+    warn:parseInt(warnN.value),
+    danger:parseInt(dangerN.value)
+  };
+  try{
+    let r=await fetch('/set_thresh',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(data)});
+    let j=await r.json();
+    let msg=document.getElementById('threshMsg');
+    msg.style.color=j.ok?'#4f4':'#f44';
+    msg.textContent=j.ok?'✅ 임계값 적용됨!':'❌ 실패';
+    if(j.ok) curTH=data;
+    setTimeout(()=>msg.textContent='',3000);
   }catch(e){console.error(e);}
 }
 
@@ -348,67 +370,61 @@ async function fetchData(){
     if(L.length>100){L.shift();D.shift();}
     ch.update();
 
-    // 수치 업데이트
+    // 현재 임계값 표시 업데이트
+    if(j.thresholds){
+      let th=j.thresholds;
+      curTH=th;
+      // 슬라이더/숫자 동기화
+      idleR.value=idleN.value=idleV.textContent=th.idle;
+      cookR.value=cookN.value=cookV.textContent=th.cook;
+      warnR.value=warnN.value=warnV.textContent=th.warn;
+      dangerR.value=dangerN.value=dangerV.textContent=th.danger;
+    }
+
     document.getElementById('gV').textContent=v;
-    if(v>mx)mx=v;
-    ts+=v;tc++;
 
     // 가스 바
     let pct=Math.min(100,v/65535*100);
     let gbi=document.getElementById('gBI');
     gbi.style.width=pct+'%';
-    gbi.style.background=v<15000?'#4f4':v<30000?'#fa0':'#f22';
+    gbi.style.background=v<curTH.cook?'#4f4':v<curTH.warn?'#fa0':'#f22';
 
-    // 상태 배지 + 타이머
+    // 상태 배지
     let sb=document.getElementById('sB');
     let state=j.state;
     let remaining=j.remaining;
     let duration=j.duration;
 
-    if(state==='danger'){
-      sb.textContent='🚨 위험!';sb.className='badge b2';
-    } else if(state==='done'){
-      sb.textContent='⏰ 종료!';sb.className='badge b4';
-    } else if(state==='running'){
-      sb.textContent='🍳 요리중';sb.className='badge b3';
-    } else if(state==='warning'){
-      sb.textContent='⚠️ 임박!';sb.className='badge b1';
-    } else {
-      sb.textContent='✅ 대기중';sb.className='badge b0';
-    }
+    if(state==='danger'){sb.textContent='🚨 위험!';sb.className='badge b2';}
+    else if(state==='done'){sb.textContent='⏰ 종료!';sb.className='badge b4';}
+    else if(state==='warning'){sb.textContent='⚠️ 임박!';sb.className='badge b1';}
+    else if(state==='running'){sb.textContent='🍳 요리중';sb.className='badge b3';}
+    else{sb.textContent='✅ 대기중';sb.className='badge b0';}
 
-    // 타이머 표시
+    // 타이머
     let bigT=document.getElementById('bigT');
     let tS=document.getElementById('tS');
     let pI=document.getElementById('pI');
-
-    if(state==='idle'||remaining===null){
-      bigT.textContent='--:--';
-      tS.textContent='--:--';
-      pI.style.width='0%';
-      updateDots('idle',0);
+    if(remaining===null||remaining===undefined){
+      bigT.textContent='--:--';tS.textContent='--:--';
+      pI.style.width='0%';updateDots('idle',0);
     } else {
       bigT.textContent=fmt(remaining);
       tS.textContent=fmt(remaining);
       let ratio=remaining/duration;
-      let barColor=remaining<=60?'#f22':remaining<=120?'#fa0':'#48f';
       pI.style.width=(100*(1-ratio))+'%';
-      pI.style.background=barColor;
-      updateDots(state, remaining/duration);
+      pI.style.background=remaining<=60?'#f22':remaining<=120?'#fa0':'#48f';
+      updateDots(state,ratio);
     }
-
   }catch(e){console.error(e);}
 }
 
 setInterval(fetchData,500);
 fetchData();
-setInterval(()=>{
-  let ds=document.querySelectorAll('.dot');
-  // 깜빡 효과 유지
-},150);
+setInterval(()=>{if(D.length)fetchData()},150);
 </script></body></html>"""
 
-PARTS = [H1, H2, H3, H4, H5]
+PARTS = [H1, H2, H3, H4, H5, H6]
 
 # ===== 서버 =====
 def start_server(ip):
@@ -421,27 +437,25 @@ def start_server(ip):
     return s
 
 def handle_client(cl):
-    global timer_duration, timer_start, timer_running, cooking
-    global idle_count
+    global timer_duration, timer_start, timer_running
+    global cooking, idle_count, timer_done_notified
+    global TH_IDLE, TH_COOK, TH_WARN, TH_DANGER
 
     try:
         cl.settimeout(3)
-        raw = cl.recv(1024)
-        req = raw.decode('utf-8', 'ignore')
+        raw  = cl.recv(1024)
+        req  = raw.decode('utf-8', 'ignore')
         if not req:
             return
-
-        line = req.split('\r\n')[0]
-        parts = line.split(' ')
-        method = parts[0] if len(parts) > 0 else 'GET'
+        line   = req.split('\r\n')[0]
+        parts  = line.split(' ')
+        method = parts[0] if parts else 'GET'
         path   = parts[1] if len(parts) > 1 else '/'
 
-        # ---- /data ----
+        # /data
         if path == '/data':
-            elapsed = time.ticks_diff(time.ticks_ms(), timer_start) / 1000 if timer_running else 0
+            elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000 if timer_running else 0
             remaining = max(0, timer_duration - elapsed) if timer_running else None
-
-            # 상태 결정
             if last_gas >= TH_DANGER:
                 state = 'danger'
             elif timer_running and remaining is not None and remaining <= 0:
@@ -452,27 +466,32 @@ def handle_client(cl):
                 state = 'running'
             else:
                 state = 'idle'
-
             body = json.dumps({
-                "value": last_gas,
-                "state": state,
-                "remaining": int(remaining) if remaining is not None else None,
-                "duration": timer_duration,
-                "cooking": cooking
+                "value":      last_gas,
+                "state":      state,
+                "remaining":  int(remaining) if remaining is not None else None,
+                "duration":   timer_duration,
+                "cooking":    cooking,
+                "thresholds": {
+                    "idle":   TH_IDLE,
+                    "cook":   TH_COOK,
+                    "warn":   TH_WARN,
+                    "danger": TH_DANGER
+                }
             })
             cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
             cl.send(body.encode())
 
-        # ---- /set_timer ----
+        # /set_timer
         elif path == '/set_timer' and method == 'POST':
-            # body 파싱
             body_str = req.split('\r\n\r\n')[-1]
             try:
                 data = json.loads(body_str)
-                timer_duration = int(data.get('duration', 600))
-                timer_running = False  # 설정만, 시작은 가스 감지 시
-                cooking = False
-                idle_count = 0
+                timer_duration      = int(data.get('duration', 600))
+                timer_running       = False
+                cooking             = False
+                idle_count          = 0
+                timer_done_notified = False
                 print(f"타이머 설정: {timer_duration}초")
                 cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
                 cl.send(b'{"ok":true}')
@@ -480,20 +499,37 @@ def handle_client(cl):
                 cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
                 cl.send(b'{"ok":false}')
 
-        # ---- /stop_timer ----
+        # /stop_timer
         elif path == '/stop_timer' and method == 'POST':
-            timer_running = False
-            cooking = False
-            idle_count = 0
+            timer_running       = False
+            cooking             = False
+            idle_count          = 0
+            timer_done_notified = False
             print("타이머 중지")
             cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
             cl.send(b'{"ok":true}')
 
-        # ---- /favicon.ico ----
+        # /set_thresh
+        elif path == '/set_thresh' and method == 'POST':
+            body_str = req.split('\r\n\r\n')[-1]
+            try:
+                data      = json.loads(body_str)
+                TH_IDLE   = int(data.get('idle',   TH_IDLE))
+                TH_COOK   = int(data.get('cook',   TH_COOK))
+                TH_WARN   = int(data.get('warn',   TH_WARN))
+                TH_DANGER = int(data.get('danger', TH_DANGER))
+                print(f"임계값 변경: idle={TH_IDLE} cook={TH_COOK} warn={TH_WARN} danger={TH_DANGER}")
+                cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
+                cl.send(b'{"ok":true}')
+            except:
+                cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
+                cl.send(b'{"ok":false}')
+
+        # favicon
         elif path == '/favicon.ico':
             cl.send(b"HTTP/1.1 204\r\n\r\n")
 
-        # ---- HTML ----
+        # HTML
         else:
             cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n")
             for part in PARTS:
@@ -511,7 +547,7 @@ def handle_client(cl):
 # ===== 메인 =====
 def main():
     global last_gas, last_sensor, timer_running, timer_start
-    global cooking, idle_count
+    global cooking, idle_count, timer_done_notified
 
     clear_led()
     gc.collect()
@@ -524,8 +560,6 @@ def main():
 
     server = start_server(ip)
     print("시스템 준비!")
-
-    timer_done_notified = False  # 종료 알림 중복 방지
 
     while True:
         # 클라이언트 처리
@@ -542,34 +576,35 @@ def main():
         now = time.ticks_ms()
         if time.ticks_diff(now, last_sensor) >= 500:
             last_sensor = now
-            last_gas = gas_sensor.read_u16()
+            last_gas    = gas_sensor.read_u16()
 
             # 위험 감지
             if last_gas >= TH_DANGER:
                 discord_danger(last_gas)
 
-            # 요리 시작 감지 (타이머 미작동 중에만)
+            # 요리 시작 감지
             if not timer_running and last_gas >= TH_COOK:
                 idle_count = 0
                 if not cooking:
-                    cooking = True
-                    timer_start = time.ticks_ms()
-                    timer_running = True
+                    cooking             = True
+                    timer_start         = time.ticks_ms()
+                    timer_running       = True
                     timer_done_notified = False
-                    print(f"요리 감지! 타이머 시작 ({timer_duration}초)")
+                    print(f"요리 감지! {timer_duration}초 타이머 시작")
                     discord_timer_start()
 
-            # 요리 종료 감지 (가스 낮아지면)
+            # 요리 종료 감지
             if cooking and last_gas < TH_IDLE:
                 idle_count += 1
-                if idle_count >= 6:  # 3초 연속 낮으면 종료
-                    cooking = False
-                    timer_running = False
-                    idle_count = 0
+                if idle_count >= 6:
+                    cooking             = False
+                    timer_running       = False
+                    idle_count          = 0
                     timer_done_notified = False
-                    print("가스 꺼짐 감지, 타이머 초기화")
+                    print("가스 꺼짐, 타이머 초기화")
             else:
-                idle_count = 0
+                if last_gas >= TH_IDLE:
+                    idle_count = 0
 
             # 타이머 종료 체크
             if timer_running:
