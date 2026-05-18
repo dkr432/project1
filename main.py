@@ -63,7 +63,6 @@ def update_led():
                 led[i] = (0, 0, 40) if i < on_cnt else (0, 0, 0)
         led.write()
         return
-    # 평상시 초록 숨쉬기
     t = time.ticks_ms()
     brightness = int((t % 3000) / 3000 * 30)
     if (t % 6000) >= 3000:
@@ -179,13 +178,12 @@ input[type=number]{background:#1a1a2e;border:1px solid #333;color:#fff;
 .msg{font-size:13px;margin-top:8px;min-height:18px}
 .bar-o{height:14px;background:#1a1a2e;border-radius:7px;overflow:hidden;margin:6px 0}
 .bar-i{height:100%;border-radius:7px;transition:width .3s}
-.sep{border:none;border-top:1px solid #2a2a3a;margin:14px 0}
-.cur-val{font-size:12px;color:#888;margin-left:6px}
+.cur-val{font-size:12px;color:#f90;margin-left:6px}
 </style></head><body>
 <h1>🍳 요리 안전 도우미</h1>
 """
 
-H3 = b"""<div class="r">
+H2b = b"""<div class="r">
 <div class="c"><div class="lb">가스 수치</div>
   <div class="v" id="gV">--</div></div>
 <div class="c"><div class="lb">상태</div>
@@ -207,7 +205,7 @@ H3 = b"""<div class="r">
 </div>
 """
 
-H4 = b"""<div class="box">
+H3 = b"""<div class="box">
 <h2>⚙️ 타이머 설정</h2>
 <div class="row">
   <label>분</label>
@@ -267,21 +265,25 @@ H4 = b"""<div class="box">
 </div>
 """
 
-H5 = b"""<div class="box">
+H4 = b"""<div class="box">
 <h2>📊 가스 레벨</h2>
 <div class="bar-o"><div class="bar-i" id="gBI" style="width:0%;background:#4f4"></div></div>
 <div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:3px">
-  <span>0</span><span id="thC" style="color:#fa0">요리</span>
-  <span id="thW" style="color:#fa0">주의</span>
-  <span id="thD" style="color:#f44">위험</span><span>65535</span>
+  <span>0</span>
+  <span style="color:#4f4">안전</span>
+  <span style="color:#fa0">주의</span>
+  <span style="color:#f44">위험</span>
+  <span>65535</span>
 </div>
 </div>
 <div class="box"><canvas id="gC"></canvas></div>
 """
 
-H6 = b"""<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+H5 = b"""<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let L=[],D=[],mx=0,curTH={idle:7000,cook:10000,warn:30000,danger:45000};
+let L=[],D=[],curTH={idle:7000,cook:10000,warn:30000,danger:45000};
+let threshLoaded=false;
+
 const ch=new Chart(document.getElementById('gC'),{
 type:'line',data:{labels:L,datasets:[{data:D,
 borderColor:'#f90',backgroundColor:'rgba(255,150,0,.1)',
@@ -355,7 +357,10 @@ async function applyThresh(){
     let msg=document.getElementById('threshMsg');
     msg.style.color=j.ok?'#4f4':'#f44';
     msg.textContent=j.ok?'✅ 임계값 적용됨!':'❌ 실패';
-    if(j.ok) curTH=data;
+    if(j.ok){
+      curTH=data;
+      threshLoaded=true;
+    }
     setTimeout(()=>msg.textContent='',3000);
   }catch(e){console.error(e);}
 }
@@ -365,20 +370,19 @@ async function fetchData(){
     let r=await fetch('/data');
     let j=await r.json();
     let v=j.value;
-    let now=new Date().toLocaleTimeString('ko-KR',{hour12:false});
     L.push('');D.push(v);
     if(L.length>100){L.shift();D.shift();}
     ch.update();
 
-    // 현재 임계값 표시 업데이트
-    if(j.thresholds){
+    // ★ 처음 한 번만 슬라이더 동기화
+    if(j.thresholds && !threshLoaded){
       let th=j.thresholds;
       curTH=th;
-      // 슬라이더/숫자 동기화
       idleR.value=idleN.value=idleV.textContent=th.idle;
       cookR.value=cookN.value=cookV.textContent=th.cook;
       warnR.value=warnN.value=warnV.textContent=th.warn;
       dangerR.value=dangerN.value=dangerV.textContent=th.danger;
+      threshLoaded=true;
     }
 
     document.getElementById('gV').textContent=v;
@@ -421,10 +425,20 @@ async function fetchData(){
 
 setInterval(fetchData,500);
 fetchData();
-setInterval(()=>{if(D.length)fetchData()},150);
+setInterval(()=>{
+  let ds=document.querySelectorAll('.dot');
+  let bl=Date.now()%600<300;
+  ds.forEach(d=>{
+    if(d.classList.contains('d-y')||d.classList.contains('d-r')){
+      d.style.opacity=bl?'1':'0';
+    } else {
+      d.style.opacity='1';
+    }
+  });
+},150);
 </script></body></html>"""
 
-PARTS = [H1, H2, H3, H4, H5, H6]
+PARTS = [H1, H2, H2b, H3, H4, H5]
 
 # ===== 서버 =====
 def start_server(ip):
@@ -562,7 +576,6 @@ def main():
     print("시스템 준비!")
 
     while True:
-        # 클라이언트 처리
         try:
             cl, addr = server.accept()
             handle_client(cl)
@@ -572,17 +585,14 @@ def main():
         except Exception as e:
             print(f"서버 오류: {e}")
 
-        # 센서 읽기 (0.5초마다)
         now = time.ticks_ms()
         if time.ticks_diff(now, last_sensor) >= 500:
             last_sensor = now
             last_gas    = gas_sensor.read_u16()
 
-            # 위험 감지
             if last_gas >= TH_DANGER:
                 discord_danger(last_gas)
 
-            # 요리 시작 감지
             if not timer_running and last_gas >= TH_COOK:
                 idle_count = 0
                 if not cooking:
@@ -593,7 +603,6 @@ def main():
                     print(f"요리 감지! {timer_duration}초 타이머 시작")
                     discord_timer_start()
 
-            # 요리 종료 감지
             if cooking and last_gas < TH_IDLE:
                 idle_count += 1
                 if idle_count >= 6:
@@ -606,7 +615,6 @@ def main():
                 if last_gas >= TH_IDLE:
                     idle_count = 0
 
-            # 타이머 종료 체크
             if timer_running:
                 elapsed = time.ticks_diff(time.ticks_ms(), timer_start) / 1000
                 if elapsed >= timer_duration and not timer_done_notified:
@@ -614,7 +622,6 @@ def main():
                     print("타이머 종료!")
                     discord_timer_done()
 
-            # LED 업데이트
             update_led()
 
 main()
