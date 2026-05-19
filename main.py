@@ -9,8 +9,9 @@ from wifi_config import WIFI_NETWORKS, DISCORD_WEBHOOK_URL
 
 # ===== 하드웨어 =====
 gas_sensor = ADC(Pin(26))
+TIMING = (280, 515, 515, 745)
 NUM_LEDS = 10
-led = NeoPixel(Pin(16), NUM_LEDS)
+led = NeoPixel(Pin(16), NUM_LEDS, timing=TIMING)
 
 # ===== 임계값 =====
 TH_IDLE   = 7000
@@ -26,7 +27,7 @@ cooking             = False
 last_gas            = 0
 last_sensor         = 0
 last_discord        = 0
-last_led            = 0       # LED 업데이트 타이머
+last_led            = 0
 idle_count          = 0
 timer_done_notified = False
 DISCORD_COOL        = 60000
@@ -48,7 +49,10 @@ def update_led():
     # 1순위: 위험 감지 → 빨강 빠른 번쩍
     if last_gas >= TH_DANGER:
         b = (t // 80) % 2
-        set_all(80, 0, 0) if b else clear_led()
+        if b:
+            set_all(80, 0, 0)
+        else:
+            clear_led()
         return
 
     # 2순위: 타이머 작동 중
@@ -59,13 +63,19 @@ def update_led():
         # 타이머 종료 → 빨강 깜빡
         if remaining <= 0:
             b = (t // 300) % 2
-            set_all(60, 0, 0) if b else clear_led()
+            if b:
+                set_all(60, 0, 0)
+            else:
+                clear_led()
             return
 
         # 타이머 1분 이하 → 노란색 깜빡
         if remaining <= 60:
             b = (t // 400) % 2
-            set_all(50, 30, 0) if b else clear_led()
+            if b:
+                set_all(50, 30, 0)
+            else:
+                clear_led()
             return
 
         # 타이머 진행 중 → 파란색 LED 하나씩 꺼짐
@@ -467,7 +477,6 @@ def main():
     print(f"http://{ip} 접속하세요!")
 
     while True:
-        # 클라이언트 처리
         try:
             cl, addr = s.accept()
             handle_client(cl)
@@ -479,12 +488,12 @@ def main():
 
         now = time.ticks_ms()
 
-        # ★ LED는 100ms마다 독립적으로 업데이트 (웹 요청과 무관하게!)
+        # LED 100ms마다 업데이트
         if time.ticks_diff(now, last_led) >= 100:
             last_led = now
             update_led()
 
-        # 센서는 500ms마다
+        # 센서 500ms마다
         if time.ticks_diff(now, last_sensor) >= 500:
             last_sensor = now
             last_gas    = gas_sensor.read_u16()
