@@ -46,7 +46,7 @@ def set_all(r, g, b):
 def update_led():
     t = time.ticks_ms()
 
-    # 1순위: 위험 감지 → 빨강 빠른 번쩍
+    # 1순위: 위험 → 빨강 빠른 번쩍
     if last_gas >= TH_DANGER:
         b = (t // 80) % 2
         if b:
@@ -55,7 +55,16 @@ def update_led():
             clear_led()
         return
 
-    # 2순위: 타이머 작동 중
+    # 2순위: 가스 주의 → 노란색 천천히 깜빡
+    if last_gas >= TH_WARN:
+        b = (t // 500) % 2
+        if b:
+            set_all(60, 30, 0)
+        else:
+            clear_led()
+        return
+
+    # 3순위: 타이머 작동 중
     if timer_running:
         elapsed   = time.ticks_diff(t, timer_start) / 1000
         remaining = max(0, timer_duration - elapsed)
@@ -69,16 +78,16 @@ def update_led():
                 clear_led()
             return
 
-        # 타이머 1분 이하 → 노란색 깜빡
+        # 타이머 1분 이하 → 노란색 빠르게 깜빡
         if remaining <= 60:
-            b = (t // 400) % 2
+            b = (t // 200) % 2
             if b:
                 set_all(50, 30, 0)
             else:
                 clear_led()
             return
 
-        # 타이머 진행 중 → 파란색 LED 하나씩 꺼짐
+        # 타이머 진행 중 → 파란색 하나씩 꺼짐
         ratio  = elapsed / timer_duration
         on_cnt = max(0, int(NUM_LEDS * (1 - ratio)))
         for i in range(NUM_LEDS):
@@ -86,13 +95,30 @@ def update_led():
         led.write()
         return
 
-    # 3순위: 평상시 → 초록 숨쉬기
+    # 4순위: 평상시 → 초록 숨쉬기
     brightness = int((t % 3000) / 3000 * 25)
     if (t % 6000) >= 3000:
         brightness = 25 - brightness
     for i in range(NUM_LEDS):
         led[i] = (0, brightness, 0)
     led.write()
+
+# ===== 상태 계산 =====
+def get_state():
+    elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000 if timer_running else 0
+    remaining = max(0, timer_duration - elapsed) if timer_running else None
+
+    if last_gas >= TH_DANGER:
+        return 'danger', remaining
+    if last_gas >= TH_WARN:
+        return 'gas_warn', remaining
+    if timer_running and remaining is not None and remaining <= 0:
+        return 'done', remaining
+    if timer_running and remaining is not None and remaining <= 60:
+        return 'timer_warn', remaining
+    if timer_running:
+        return 'running', remaining
+    return 'idle', remaining
 
 # ===== 디스코드 =====
 def discord_send(title, desc, color):
@@ -165,6 +191,7 @@ h1{text-align:center;font-size:22px;padding:12px;color:#f90}
 .b2{background:#3d0a0a;color:#f44;animation:p .5s infinite}
 .b3{background:#0a1a3d;color:#48f}
 .b4{background:#3d2000;color:#f90}
+.b5{background:#3d3000;color:#fa0;animation:p .5s infinite}
 @keyframes p{50%{opacity:.5}}
 .box{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;padding:18px;max-width:620px;margin:12px auto}
 .box h2{color:#aaa;margin-bottom:14px;font-size:15px}
@@ -269,7 +296,8 @@ function updateDots(state,ratio){
     d.className='dot';d.style.opacity='1';
     if(state==='idle')d.classList.add('d-g');
     else if(state==='running'){if(i<Math.round((1-ratio)*10))d.classList.add('d-b');}
-    else if(state==='warning'){if(bl)d.classList.add('d-y');}
+    else if(state==='gas_warn'){if(bl)d.classList.add('d-y');}
+    else if(state==='timer_warn'){if(bl)d.classList.add('d-y');}
     else if(state==='done'||state==='danger'){if(bl)d.classList.add('d-r');}
   });
 }
@@ -322,11 +350,15 @@ async function fetchData(){
     gbi.style.background=v<curTH.cook?'#4f4':v<curTH.warn?'#fa0':'#f22';
     let sb=document.getElementById('sB');
     let state=j.state,remaining=j.remaining,duration=j.duration;
-    if(state==='danger'){sb.textContent='위험!';sb.className='badge b2';}
-    else if(state==='done'){sb.textContent='종료!';sb.className='badge b4';}
-    else if(state==='warning'){sb.textContent='임박!';sb.className='badge b1';}
-    else if(state==='running'){sb.textContent='요리중';sb.className='badge b3';}
-    else{sb.textContent='대기중';sb.className='badge b0';}
+
+    // ★ 상태별 배지 (gas_warn, timer_warn 구분)
+    if(state==='danger'){sb.textContent='🚨 위험!';sb.className='badge b2';}
+    else if(state==='gas_warn'){sb.textContent='⚠️ 가스주의!';sb.className='badge b5';}
+    else if(state==='done'){sb.textContent='⏰ 종료!';sb.className='badge b4';}
+    else if(state==='timer_warn'){sb.textContent='⏰ 타이머임박!';sb.className='badge b1';}
+    else if(state==='running'){sb.textContent='🍳 요리중';sb.className='badge b3';}
+    else{sb.textContent='✅ 대기중';sb.className='badge b0';}
+
     if(remaining===null||remaining===undefined){
       document.getElementById('bigT').textContent='--:--';
       document.getElementById('tS').textContent='--:--';
@@ -381,18 +413,7 @@ def handle_client(cl):
         print(f"{method} {path}")
 
         if path == '/data':
-            elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000 if timer_running else 0
-            remaining = max(0, timer_duration - elapsed) if timer_running else None
-            if last_gas >= TH_DANGER:
-                state = 'danger'
-            elif timer_running and remaining is not None and remaining <= 0:
-                state = 'done'
-            elif timer_running and remaining is not None and remaining <= 60:
-                state = 'warning'
-            elif timer_running:
-                state = 'running'
-            else:
-                state = 'idle'
+            state, remaining = get_state()
             body = json.dumps({
                 "value":      last_gas,
                 "state":      state,
@@ -488,12 +509,10 @@ def main():
 
         now = time.ticks_ms()
 
-        # LED 100ms마다 업데이트
         if time.ticks_diff(now, last_led) >= 100:
             last_led = now
             update_led()
 
-        # 센서 500ms마다
         if time.ticks_diff(now, last_sensor) >= 500:
             last_sensor = now
             last_gas    = gas_sensor.read_u16()
