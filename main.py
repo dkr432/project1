@@ -26,6 +26,7 @@ cooking             = False
 last_gas            = 0
 last_sensor         = 0
 last_discord        = 0
+last_led            = 0       # LED 업데이트 타이머
 idle_count          = 0
 timer_done_notified = False
 DISCORD_COOL        = 60000
@@ -36,35 +37,49 @@ def clear_led():
         led[i] = (0, 0, 0)
     led.write()
 
+def set_all(r, g, b):
+    for i in range(NUM_LEDS):
+        led[i] = (r, g, b)
+    led.write()
+
 def update_led():
-    if last_gas >= TH_DANGER:
-        b = (time.ticks_ms() // 80) % 2
-        for i in range(NUM_LEDS):
-            led[i] = (80, 0, 0) if b else (0, 0, 0)
-        led.write()
-        return
-    if timer_running:
-        elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000
-        remaining = max(0, timer_duration - elapsed)
-        if remaining <= 0:
-            b = (time.ticks_ms() // 300) % 2
-            for i in range(NUM_LEDS):
-                led[i] = (60, 0, 0) if b else (0, 0, 0)
-        elif remaining <= 60:
-            b = (time.ticks_ms() // 400) % 2
-            for i in range(NUM_LEDS):
-                led[i] = (50, 25, 0) if b else (0, 0, 0)
-        else:
-            ratio  = elapsed / timer_duration
-            on_cnt = max(0, int(NUM_LEDS * (1 - ratio)))
-            for i in range(NUM_LEDS):
-                led[i] = (0, 0, 40) if i < on_cnt else (0, 0, 0)
-        led.write()
-        return
     t = time.ticks_ms()
-    brightness = int((t % 3000) / 3000 * 30)
+
+    # 1순위: 위험 감지 → 빨강 빠른 번쩍
+    if last_gas >= TH_DANGER:
+        b = (t // 80) % 2
+        set_all(80, 0, 0) if b else clear_led()
+        return
+
+    # 2순위: 타이머 작동 중
+    if timer_running:
+        elapsed   = time.ticks_diff(t, timer_start) / 1000
+        remaining = max(0, timer_duration - elapsed)
+
+        # 타이머 종료 → 빨강 깜빡
+        if remaining <= 0:
+            b = (t // 300) % 2
+            set_all(60, 0, 0) if b else clear_led()
+            return
+
+        # 타이머 1분 이하 → 노란색 깜빡
+        if remaining <= 60:
+            b = (t // 400) % 2
+            set_all(50, 30, 0) if b else clear_led()
+            return
+
+        # 타이머 진행 중 → 파란색 LED 하나씩 꺼짐
+        ratio  = elapsed / timer_duration
+        on_cnt = max(0, int(NUM_LEDS * (1 - ratio)))
+        for i in range(NUM_LEDS):
+            led[i] = (0, 0, 50) if i < on_cnt else (0, 0, 0)
+        led.write()
+        return
+
+    # 3순위: 평상시 → 초록 숨쉬기
+    brightness = int((t % 3000) / 3000 * 25)
     if (t % 6000) >= 3000:
-        brightness = 30 - brightness
+        brightness = 25 - brightness
     for i in range(NUM_LEDS):
         led[i] = (0, brightness, 0)
     led.write()
@@ -331,30 +346,9 @@ setInterval(()=>{
 </html>"""
 
 # ===== 서버 =====
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    scan = [s[0].decode() for s in wlan.scan()]
-    print(f"네트워크: {scan}")
-    for ssid, pw in WIFI_NETWORKS.items():
-        if ssid in scan:
-            print(f"'{ssid}' 연결 중...")
-            wlan.connect(ssid, pw)
-            t = 15
-            while not wlan.isconnected() and t > 0:
-                time.sleep(1)
-                t -= 1
-            if wlan.isconnected():
-                ip = wlan.ifconfig()[0]
-                print(f"연결! IP: {ip}")
-                return ip
-            wlan.disconnect()
-    return None
-
 def send_html(cl):
     html = get_html()
     cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n")
-    # 512바이트씩 나눠서 전송
     for i in range(0, len(html), 512):
         cl.send(html[i:i+512].encode('utf-8'))
         time.sleep_ms(20)
@@ -452,7 +446,8 @@ def handle_client(cl):
 
 # ===== 메인 =====
 def main():
-    global last_gas, last_sensor, timer_running, timer_start
+    global last_gas, last_sensor, last_led
+    global timer_running, timer_start
     global cooking, idle_count, timer_done_notified
 
     clear_led()
@@ -472,6 +467,7 @@ def main():
     print(f"http://{ip} 접속하세요!")
 
     while True:
+        # 클라이언트 처리
         try:
             cl, addr = s.accept()
             handle_client(cl)
@@ -482,9 +478,17 @@ def main():
             print(f"서버 오류: {e}")
 
         now = time.ticks_ms()
+
+        # ★ LED는 100ms마다 독립적으로 업데이트 (웹 요청과 무관하게!)
+        if time.ticks_diff(now, last_led) >= 100:
+            last_led = now
+            update_led()
+
+        # 센서는 500ms마다
         if time.ticks_diff(now, last_sensor) >= 500:
             last_sensor = now
             last_gas    = gas_sensor.read_u16()
+            print(f"가스: {last_gas}")
 
             if last_gas >= TH_DANGER:
                 discord_danger(last_gas)
@@ -517,7 +521,5 @@ def main():
                     timer_done_notified = True
                     print("타이머 종료!")
                     discord_timer_done()
-
-            update_led()
 
 main()
