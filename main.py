@@ -46,48 +46,30 @@ def set_all(r, g, b):
 def update_led():
     t = time.ticks_ms()
 
-    # 1순위: 위험 → 빨강 빠른 번쩍
     if last_gas >= TH_DANGER:
         b = (t // 80) % 2
-        if b:
-            set_all(80, 0, 0)
-        else:
-            clear_led()
+        set_all(80, 0, 0) if b else clear_led()
         return
 
-    # 2순위: 가스 주의 → 노란색 천천히 깜빡
     if last_gas >= TH_WARN:
         b = (t // 500) % 2
-        if b:
-            set_all(60, 30, 0)
-        else:
-            clear_led()
+        set_all(60, 30, 0) if b else clear_led()
         return
 
-    # 3순위: 타이머 작동 중
     if timer_running:
         elapsed   = time.ticks_diff(t, timer_start) / 1000
         remaining = max(0, timer_duration - elapsed)
 
-        # 타이머 종료 → 빨강 깜빡
         if remaining <= 0:
             b = (t // 300) % 2
-            if b:
-                set_all(60, 0, 0)
-            else:
-                clear_led()
+            set_all(60, 0, 0) if b else clear_led()
             return
 
-        # 타이머 1분 이하 → 노란색 빠르게 깜빡
         if remaining <= 60:
             b = (t // 200) % 2
-            if b:
-                set_all(50, 30, 0)
-            else:
-                clear_led()
+            set_all(50, 30, 0) if b else clear_led()
             return
 
-        # 타이머 진행 중 → 파란색 하나씩 꺼짐
         ratio  = elapsed / timer_duration
         on_cnt = max(0, int(NUM_LEDS * (1 - ratio)))
         for i in range(NUM_LEDS):
@@ -95,7 +77,6 @@ def update_led():
         led.write()
         return
 
-    # 4순위: 평상시 → 초록 숨쉬기
     brightness = int((t % 3000) / 3000 * 25)
     if (t % 6000) >= 3000:
         brightness = 25 - brightness
@@ -103,7 +84,6 @@ def update_led():
         led[i] = (0, brightness, 0)
     led.write()
 
-# ===== 상태 계산 =====
 def get_state():
     elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000 if timer_running else 0
     remaining = max(0, timer_duration - elapsed) if timer_running else None
@@ -168,170 +148,666 @@ def connect_wifi():
             wlan.disconnect()
     return None
 
-# ===== HTML =====
+# ===== HTML (완전 리뉴얼!) =====
 def get_html():
     return """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>요리 안전 도우미</title>
+<title>🔥 SmartChef AI 🔥</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:sans-serif;background:#0b0b12;color:#ddd;padding:15px}
-h1{text-align:center;font-size:22px;padding:12px;color:#f90}
-.r{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:10px 0}
-.c{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;padding:14px 18px;text-align:center;min-width:130px}
-.lb{font-size:11px;color:#777;margin-bottom:4px}
-.v{font-size:26px;font-weight:bold;margin:4px 0}
-.badge{display:inline-block;padding:3px 14px;border-radius:12px;font-size:13px;font-weight:bold}
-.b0{background:#0a3d0a;color:#4f4}
-.b1{background:#3d3000;color:#fa0}
-.b2{background:#3d0a0a;color:#f44;animation:p .5s infinite}
-.b3{background:#0a1a3d;color:#48f}
-.b4{background:#3d2000;color:#f90}
-.b5{background:#3d3000;color:#fa0;animation:p .5s infinite}
-@keyframes p{50%{opacity:.5}}
-.box{background:#13131e;border:1px solid #2a2a3a;border-radius:10px;padding:18px;max-width:620px;margin:12px auto}
-.box h2{color:#aaa;margin-bottom:14px;font-size:15px}
-.big-timer{font-size:52px;font-weight:bold;color:#fff;text-align:center;margin:10px 0}
-.prog-o{height:18px;background:#1a1a2e;border-radius:9px;overflow:hidden;margin:10px 0}
-.prog-i{height:100%;border-radius:9px;transition:width .5s}
-.dots{display:flex;justify-content:center;gap:5px;margin:10px 0}
-.dot{width:16px;height:16px;border-radius:50%;background:#1a1a2e;border:1px solid #333}
-.d-g{background:#0c0;box-shadow:0 0 5px #0c0}
-.d-b{background:#48f;box-shadow:0 0 5px #48f}
-.d-y{background:#fa0;box-shadow:0 0 5px #fa0}
-.d-r{background:#f22;box-shadow:0 0 5px #f22}
-.row{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}
-.row label{color:#888;font-size:13px;min-width:120px}
-input[type=range]{flex:1;min-width:120px;accent-color:#f90}
-input[type=number]{background:#1a1a2e;border:1px solid #333;color:#fff;padding:4px 8px;border-radius:6px;width:80px;font-size:14px}
-.btn{padding:9px 20px;border:none;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer;margin:3px}
-.btn-o{background:#f90;color:#000}
-.btn-r{background:#f44;color:#fff}
-.btn-b{background:#48f;color:#fff}
-.msg{font-size:13px;margin-top:8px;min-height:18px}
-.bar-o{height:14px;background:#1a1a2e;border-radius:7px;overflow:hidden;margin:6px 0}
-.bar-i{height:100%;border-radius:7px;transition:width .3s}
-.cur-val{font-size:12px;color:#f90;margin-left:6px}
+body{
+  font-family:'Noto Sans KR',sans-serif;
+  background:#000;
+  color:#fff;
+  min-height:100vh;
+  overflow-x:hidden;
+  position:relative;
+}
+
+/* 배경 애니메이션 */
+body::before{
+  content:'';
+  position:fixed;
+  top:0;left:0;width:100%;height:100%;
+  background:
+    radial-gradient(circle at 20% 30%,rgba(255,100,0,.15),transparent 50%),
+    radial-gradient(circle at 80% 70%,rgba(255,0,100,.15),transparent 50%),
+    radial-gradient(circle at 50% 50%,rgba(100,0,255,.1),transparent 50%);
+  animation:bgMove 15s ease infinite;
+  z-index:-2;
+}
+@keyframes bgMove{
+  0%,100%{transform:scale(1) rotate(0deg)}
+  50%{transform:scale(1.2) rotate(180deg)}
+}
+
+/* 격자 배경 */
+body::after{
+  content:'';
+  position:fixed;
+  top:0;left:0;width:100%;height:100%;
+  background:
+    linear-gradient(rgba(255,150,0,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,150,0,.03) 1px,transparent 1px);
+  background-size:40px 40px;
+  z-index:-1;
+  animation:gridMove 20s linear infinite;
+}
+@keyframes gridMove{
+  0%{background-position:0 0}
+  100%{background-position:40px 40px}
+}
+
+.container{padding:20px;max-width:1200px;margin:0 auto}
+
+/* 헤더 */
+.header{
+  text-align:center;
+  padding:30px 0 20px;
+  position:relative;
+}
+.header h1{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(28px,5vw,48px);
+  font-weight:900;
+  background:linear-gradient(90deg,#ff6b00,#ff0080,#ff6b00);
+  background-size:200% 100%;
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  animation:shine 3s linear infinite;
+  letter-spacing:3px;
+  text-shadow:0 0 30px rgba(255,107,0,.5);
+}
+@keyframes shine{
+  0%{background-position:0% 50%}
+  100%{background-position:200% 50%}
+}
+.header .sub{
+  font-size:13px;
+  color:#888;
+  margin-top:8px;
+  letter-spacing:5px;
+}
+
+/* 상태 카드 */
+.status-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:15px;
+  margin:25px 0;
+}
+.scard{
+  background:linear-gradient(135deg,rgba(20,20,40,.9),rgba(40,20,40,.9));
+  border:1px solid rgba(255,107,0,.3);
+  border-radius:16px;
+  padding:20px;
+  text-align:center;
+  position:relative;
+  overflow:hidden;
+  backdrop-filter:blur(10px);
+  transition:all .3s;
+}
+.scard:hover{
+  transform:translateY(-5px);
+  border-color:rgba(255,107,0,.8);
+  box-shadow:0 10px 30px rgba(255,107,0,.3);
+}
+.scard::before{
+  content:'';
+  position:absolute;
+  top:-50%;left:-50%;width:200%;height:200%;
+  background:linear-gradient(45deg,transparent,rgba(255,107,0,.1),transparent);
+  animation:cardShine 4s linear infinite;
+}
+@keyframes cardShine{
+  0%{transform:translateX(-100%) translateY(-100%)}
+  100%{transform:translateX(100%) translateY(100%)}
+}
+.scard-lb{
+  font-size:11px;
+  color:#888;
+  letter-spacing:2px;
+  margin-bottom:8px;
+  text-transform:uppercase;
+}
+.scard-v{
+  font-family:'Orbitron',sans-serif;
+  font-size:36px;
+  font-weight:900;
+  background:linear-gradient(135deg,#ff6b00,#ff0080);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+
+/* 배지 */
+.badge{
+  display:inline-block;
+  padding:8px 20px;
+  border-radius:20px;
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:2px;
+  text-transform:uppercase;
+}
+.b0{background:linear-gradient(135deg,#0a7d3a,#0e9d4a);box-shadow:0 0 20px rgba(15,200,80,.5)}
+.b1{background:linear-gradient(135deg,#cc6600,#ff8800);box-shadow:0 0 20px rgba(255,150,0,.6);animation:p .5s infinite}
+.b2{background:linear-gradient(135deg,#cc0000,#ff0044);box-shadow:0 0 30px rgba(255,0,68,.8);animation:p .3s infinite}
+.b3{background:linear-gradient(135deg,#0044cc,#0080ff);box-shadow:0 0 20px rgba(0,128,255,.6)}
+.b4{background:linear-gradient(135deg,#ff4400,#ff8800);box-shadow:0 0 25px rgba(255,100,0,.7);animation:p .4s infinite}
+.b5{background:linear-gradient(135deg,#ffaa00,#ffdd00);color:#000;box-shadow:0 0 25px rgba(255,200,0,.7);animation:p .5s infinite}
+@keyframes p{50%{opacity:.4;transform:scale(.95)}}
+
+/* 박스 */
+.box{
+  background:linear-gradient(135deg,rgba(15,15,30,.95),rgba(30,15,30,.95));
+  border:1px solid rgba(255,107,0,.2);
+  border-radius:20px;
+  padding:25px;
+  margin:20px 0;
+  position:relative;
+  backdrop-filter:blur(15px);
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+}
+.box h2{
+  font-family:'Orbitron',sans-serif;
+  color:#ff6b00;
+  font-size:16px;
+  letter-spacing:3px;
+  margin-bottom:20px;
+  text-transform:uppercase;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.box h2::before{
+  content:'';
+  width:4px;height:24px;
+  background:linear-gradient(180deg,#ff6b00,#ff0080);
+  border-radius:2px;
+  box-shadow:0 0 10px rgba(255,107,0,.8);
+}
+
+/* 메인 타이머 */
+.timer-main{
+  text-align:center;
+  padding:30px 0;
+  position:relative;
+}
+.timer-ring{
+  width:280px;height:280px;
+  margin:0 auto 20px;
+  position:relative;
+}
+.timer-svg{
+  width:100%;height:100%;
+  transform:rotate(-90deg);
+  filter:drop-shadow(0 0 20px rgba(255,107,0,.5));
+}
+.timer-bg{fill:none;stroke:rgba(255,255,255,.05);stroke-width:8}
+.timer-fill{
+  fill:none;
+  stroke:url(#grad1);
+  stroke-width:8;
+  stroke-linecap:round;
+  transition:stroke-dashoffset .5s ease;
+}
+.timer-center{
+  position:absolute;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  text-align:center;
+}
+.timer-num{
+  font-family:'Orbitron',sans-serif;
+  font-size:56px;
+  font-weight:900;
+  color:#fff;
+  text-shadow:0 0 30px rgba(255,107,0,.8);
+  line-height:1;
+}
+.timer-lb{
+  font-size:11px;
+  color:#888;
+  letter-spacing:3px;
+  margin-top:8px;
+}
+
+/* LED 시뮬레이션 */
+.led-strip{
+  display:flex;
+  justify-content:center;
+  gap:8px;
+  margin:20px 0;
+  padding:15px;
+  background:rgba(0,0,0,.5);
+  border-radius:15px;
+  border:1px solid rgba(255,107,0,.2);
+}
+.led-dot{
+  width:24px;height:24px;
+  border-radius:50%;
+  background:#1a1a2e;
+  border:2px solid #333;
+  transition:all .2s;
+  position:relative;
+}
+.led-dot::after{
+  content:'';
+  position:absolute;
+  top:-3px;left:-3px;right:-3px;bottom:-3px;
+  border-radius:50%;
+  opacity:0;
+  transition:opacity .3s;
+}
+.led-on-g{background:radial-gradient(#0f0,#080);box-shadow:0 0 15px #0f0,0 0 30px rgba(0,255,0,.5)}
+.led-on-b{background:radial-gradient(#48f,#06c);box-shadow:0 0 15px #48f,0 0 30px rgba(50,150,255,.5)}
+.led-on-y{background:radial-gradient(#fa0,#c80);box-shadow:0 0 15px #fa0,0 0 30px rgba(255,170,0,.5)}
+.led-on-r{background:radial-gradient(#f22,#a00);box-shadow:0 0 20px #f22,0 0 40px rgba(255,30,30,.7)}
+
+/* 컨트롤 */
+.row{
+  display:flex;
+  align-items:center;
+  gap:15px;
+  margin:15px 0;
+  flex-wrap:wrap;
+}
+.row label{
+  color:#aaa;
+  font-size:13px;
+  min-width:120px;
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.cur-val{
+  font-family:'Orbitron',sans-serif;
+  color:#ff6b00;
+  font-weight:900;
+  font-size:14px;
+}
+
+/* 슬라이더 */
+input[type=range]{
+  flex:1;
+  min-width:150px;
+  -webkit-appearance:none;
+  appearance:none;
+  height:8px;
+  background:linear-gradient(90deg,#1a1a2e,#2a1a3e);
+  border-radius:4px;
+  outline:none;
+  cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:22px;height:22px;
+  background:linear-gradient(135deg,#ff6b00,#ff0080);
+  border-radius:50%;
+  cursor:pointer;
+  box-shadow:0 0 15px rgba(255,107,0,.8);
+  transition:transform .2s;
+}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.3)}
+input[type=range]::-moz-range-thumb{
+  width:22px;height:22px;
+  background:linear-gradient(135deg,#ff6b00,#ff0080);
+  border-radius:50%;
+  cursor:pointer;
+  border:none;
+  box-shadow:0 0 15px rgba(255,107,0,.8);
+}
+
+input[type=number]{
+  background:rgba(0,0,0,.5);
+  border:1px solid rgba(255,107,0,.3);
+  color:#ff6b00;
+  padding:8px 12px;
+  border-radius:8px;
+  width:90px;
+  font-size:14px;
+  font-family:'Orbitron',sans-serif;
+  font-weight:700;
+  text-align:center;
+}
+input[type=number]:focus{
+  outline:none;
+  border-color:#ff6b00;
+  box-shadow:0 0 15px rgba(255,107,0,.5);
+}
+
+/* 버튼 */
+.btn{
+  padding:12px 28px;
+  border:none;
+  border-radius:10px;
+  font-size:14px;
+  font-weight:900;
+  cursor:pointer;
+  margin:5px;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  transition:all .3s;
+  position:relative;
+  overflow:hidden;
+}
+.btn::before{
+  content:'';
+  position:absolute;
+  top:0;left:-100%;width:100%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
+  transition:left .5s;
+}
+.btn:hover::before{left:100%}
+.btn:hover{transform:translateY(-2px)}
+.btn:active{transform:translateY(0)}
+.btn-o{
+  background:linear-gradient(135deg,#ff6b00,#ff0080);
+  color:#fff;
+  box-shadow:0 5px 20px rgba(255,107,0,.4);
+}
+.btn-o:hover{box-shadow:0 8px 30px rgba(255,107,0,.6)}
+.btn-r{
+  background:linear-gradient(135deg,#cc0000,#ff0044);
+  color:#fff;
+  box-shadow:0 5px 20px rgba(255,0,68,.4);
+}
+.btn-r:hover{box-shadow:0 8px 30px rgba(255,0,68,.6)}
+.btn-b{
+  background:linear-gradient(135deg,#0044cc,#0080ff);
+  color:#fff;
+  box-shadow:0 5px 20px rgba(0,128,255,.4);
+}
+.btn-b:hover{box-shadow:0 8px 30px rgba(0,128,255,.6)}
+
+.msg{
+  font-size:14px;
+  margin-top:12px;
+  min-height:20px;
+  font-weight:700;
+  letter-spacing:1px;
+}
+
+/* 가스 미터 */
+.gas-meter{
+  height:30px;
+  background:linear-gradient(90deg,#0a0a1e,#1a0a2e);
+  border-radius:15px;
+  overflow:hidden;
+  margin:15px 0;
+  position:relative;
+  border:1px solid rgba(255,107,0,.2);
+  box-shadow:inset 0 2px 10px rgba(0,0,0,.5);
+}
+.gas-fill{
+  height:100%;
+  border-radius:15px;
+  transition:width .5s,background .3s;
+  position:relative;
+  overflow:hidden;
+}
+.gas-fill::after{
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;bottom:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
+  animation:gasShine 2s linear infinite;
+}
+@keyframes gasShine{
+  0%{transform:translateX(-100%)}
+  100%{transform:translateX(100%)}
+}
+
+/* 차트 */
+.chart-box{
+  background:linear-gradient(135deg,rgba(10,10,30,.95),rgba(20,10,30,.95));
+  border-radius:20px;
+  padding:25px;
+  margin:20px 0;
+  border:1px solid rgba(255,107,0,.2);
+  box-shadow:0 8px 32px rgba(0,0,0,.5);
+}
+
+/* 알림 효과 */
+@keyframes pulseAlert{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.02)}
+}
+.alert-pulse{animation:pulseAlert 1s infinite}
+
+/* 푸터 */
+.footer{
+  text-align:center;
+  padding:30px 0;
+  color:#555;
+  font-size:11px;
+  letter-spacing:3px;
+}
+
+/* 반응형 */
+@media(max-width:600px){
+  .timer-ring{width:220px;height:220px}
+  .timer-num{font-size:42px}
+  .header h1{font-size:28px;letter-spacing:1px}
+}
 </style>
 </head>
 <body>
-<h1>요리 안전 도우미</h1>
-<div class="r">
-<div class="c"><div class="lb">가스 수치</div><div class="v" id="gV">--</div></div>
-<div class="c"><div class="lb">상태</div><div style="margin:6px"><span class="badge b0" id="sB">대기중</span></div></div>
-<div class="c"><div class="lb">남은 시간</div><div class="v" style="color:#48f" id="tS">--:--</div></div>
+<div class="container">
+
+<div class="header">
+  <h1>🔥 SMART CHEF AI 🔥</h1>
+  <div class="sub">REAL-TIME COOKING SAFETY SYSTEM</div>
 </div>
+
+<div class="status-grid">
+  <div class="scard">
+    <div class="scard-lb">GAS LEVEL</div>
+    <div class="scard-v" id="gV">--</div>
+  </div>
+  <div class="scard">
+    <div class="scard-lb">STATUS</div>
+    <div style="margin-top:10px"><span class="badge b0" id="sB">대기중</span></div>
+  </div>
+  <div class="scard">
+    <div class="scard-lb">REMAINING</div>
+    <div class="scard-v" id="tS" style="background:linear-gradient(135deg,#0080ff,#0044cc);-webkit-background-clip:text;-webkit-text-fill-color:transparent">--:--</div>
+  </div>
+</div>
+
 <div class="box">
-<h2 style="text-align:center;color:#f90">타이머</h2>
-<div class="big-timer" id="bigT">--:--</div>
-<div class="prog-o"><div class="prog-i" id="pI" style="width:0%;background:#48f"></div></div>
-<div class="dots">
-<div class="dot"></div><div class="dot"></div><div class="dot"></div>
-<div class="dot"></div><div class="dot"></div><div class="dot"></div>
-<div class="dot"></div><div class="dot"></div><div class="dot"></div>
-<div class="dot"></div>
+  <h2>⏱ COOKING TIMER</h2>
+  <div class="timer-main">
+    <div class="timer-ring">
+      <svg class="timer-svg" viewBox="0 0 100 100">
+        <defs>
+          <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#ff6b00"/>
+            <stop offset="50%" style="stop-color:#ff0080"/>
+            <stop offset="100%" style="stop-color:#8000ff"/>
+          </linearGradient>
+        </defs>
+        <circle class="timer-bg" cx="50" cy="50" r="45"/>
+        <circle class="timer-fill" id="timerFill" cx="50" cy="50" r="45"
+                stroke-dasharray="282.7" stroke-dashoffset="282.7"/>
+      </svg>
+      <div class="timer-center">
+        <div class="timer-num" id="bigT">--:--</div>
+        <div class="timer-lb">REMAINING</div>
+      </div>
+    </div>
+
+    <div class="led-strip">
+      <div class="led-dot"></div><div class="led-dot"></div>
+      <div class="led-dot"></div><div class="led-dot"></div>
+      <div class="led-dot"></div><div class="led-dot"></div>
+      <div class="led-dot"></div><div class="led-dot"></div>
+      <div class="led-dot"></div><div class="led-dot"></div>
+    </div>
+  </div>
 </div>
-</div>
+
 <div class="box">
-<h2>타이머 설정</h2>
-<div class="row">
-<label>분</label>
-<input type="range" id="minR" min="1" max="60" value="10" oninput="minN.value=this.value">
-<input type="number" id="minN" value="10" min="1" max="60" oninput="minR.value=this.value">
+  <h2>⚙ TIMER SETTINGS</h2>
+  <div class="row">
+    <label>⏰ MINUTES <span class="cur-val" id="minV">10</span></label>
+    <input type="range" id="minR" min="0" max="60" value="10" oninput="minN.value=this.value;minV.textContent=this.value">
+    <input type="number" id="minN" value="10" min="0" max="60" oninput="minR.value=this.value;minV.textContent=this.value">
+  </div>
+  <div class="row">
+    <label>⏱ SECONDS <span class="cur-val" id="secV">0</span></label>
+    <input type="range" id="secR" min="0" max="59" value="0" oninput="secN.value=this.value;secV.textContent=this.value">
+    <input type="number" id="secN" value="0" min="0" max="59" oninput="secR.value=this.value;secV.textContent=this.value">
+  </div>
+  <div style="margin-top:15px">
+    <button class="btn btn-o" onclick="applyTimer()">✅ 타이머 적용</button>
+    <button class="btn btn-r" onclick="stopTimer()">⏹ 중지</button>
+  </div>
+  <div class="msg" id="timerMsg"></div>
 </div>
-<div class="row">
-<label>초</label>
-<input type="range" id="secR" min="0" max="59" value="0" oninput="secN.value=this.value">
-<input type="number" id="secN" value="0" min="0" max="59" oninput="secR.value=this.value">
-</div>
-<div>
-<button class="btn btn-o" onclick="applyTimer()">타이머 적용</button>
-<button class="btn btn-r" onclick="stopTimer()">중지</button>
-</div>
-<div class="msg" id="timerMsg"></div>
-</div>
+
 <div class="box">
-<h2>감지 임계값 설정</h2>
-<div class="row">
-<label>가스없음<span class="cur-val" id="idleV">7000</span></label>
-<input type="range" id="idleR" min="1000" max="20000" step="500" value="7000" oninput="idleV.textContent=this.value;idleN.value=this.value">
-<input type="number" id="idleN" value="7000" min="1000" max="20000" oninput="idleR.value=this.value;idleV.textContent=this.value">
+  <h2>🎚 SENSOR THRESHOLDS</h2>
+  <div class="row">
+    <label>💨 가스없음 <span class="cur-val" id="idleV">7000</span></label>
+    <input type="range" id="idleR" min="1000" max="20000" step="500" value="7000" oninput="idleV.textContent=this.value;idleN.value=this.value">
+    <input type="number" id="idleN" value="7000" min="1000" max="20000" oninput="idleR.value=this.value;idleV.textContent=this.value">
+  </div>
+  <div class="row">
+    <label>🍳 요리감지 <span class="cur-val" id="cookV">10000</span></label>
+    <input type="range" id="cookR" min="1000" max="40000" step="500" value="10000" oninput="cookV.textContent=this.value;cookN.value=this.value">
+    <input type="number" id="cookN" value="10000" min="1000" max="40000" oninput="cookR.value=this.value;cookV.textContent=this.value">
+  </div>
+  <div class="row">
+    <label>⚠ 주의 <span class="cur-val" id="warnV">30000</span></label>
+    <input type="range" id="warnR" min="5000" max="60000" step="500" value="30000" oninput="warnV.textContent=this.value;warnN.value=this.value">
+    <input type="number" id="warnN" value="30000" min="5000" max="60000" oninput="warnR.value=this.value;warnV.textContent=this.value">
+  </div>
+  <div class="row">
+    <label>🚨 위험 <span class="cur-val" id="dangerV">45000</span></label>
+    <input type="range" id="dangerR" min="10000" max="65000" step="500" value="45000" oninput="dangerV.textContent=this.value;dangerN.value=this.value">
+    <input type="number" id="dangerN" value="45000" min="10000" max="65000" oninput="dangerR.value=this.value;dangerV.textContent=this.value">
+  </div>
+  <div style="margin-top:15px">
+    <button class="btn btn-b" onclick="applyThresh()">✅ 임계값 적용</button>
+  </div>
+  <div class="msg" id="threshMsg"></div>
 </div>
-<div class="row">
-<label>요리감지<span class="cur-val" id="cookV">10000</span></label>
-<input type="range" id="cookR" min="1000" max="40000" step="500" value="10000" oninput="cookV.textContent=this.value;cookN.value=this.value">
-<input type="number" id="cookN" value="10000" min="1000" max="40000" oninput="cookR.value=this.value;cookV.textContent=this.value">
-</div>
-<div class="row">
-<label>주의<span class="cur-val" id="warnV">30000</span></label>
-<input type="range" id="warnR" min="5000" max="60000" step="500" value="30000" oninput="warnV.textContent=this.value;warnN.value=this.value">
-<input type="number" id="warnN" value="30000" min="5000" max="60000" oninput="warnR.value=this.value;warnV.textContent=this.value">
-</div>
-<div class="row">
-<label>위험<span class="cur-val" id="dangerV">45000</span></label>
-<input type="range" id="dangerR" min="10000" max="65000" step="500" value="45000" oninput="dangerV.textContent=this.value;dangerN.value=this.value">
-<input type="number" id="dangerN" value="45000" min="10000" max="65000" oninput="dangerR.value=this.value;dangerV.textContent=this.value">
-</div>
-<div>
-<button class="btn btn-b" onclick="applyThresh()">임계값 적용</button>
-</div>
-<div class="msg" id="threshMsg"></div>
-</div>
+
 <div class="box">
-<h2>가스 레벨</h2>
-<div class="bar-o"><div class="bar-i" id="gBI" style="width:0%;background:#4f4"></div></div>
+  <h2>📊 LIVE GAS METER</h2>
+  <div class="gas-meter"><div class="gas-fill" id="gBI" style="width:0%;background:linear-gradient(90deg,#0f0,#0a0)"></div></div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:8px;letter-spacing:1px">
+    <span>0</span>
+    <span style="color:#0f0">SAFE</span>
+    <span style="color:#fa0">WARN</span>
+    <span style="color:#f22">DANGER</span>
+    <span>65535</span>
+  </div>
 </div>
-<div class="box"><canvas id="gC"></canvas></div>
+
+<div class="chart-box">
+  <h2 style="font-family:'Orbitron';color:#ff6b00;font-size:16px;letter-spacing:3px;margin-bottom:15px">📈 GAS LEVEL HISTORY</h2>
+  <canvas id="gC"></canvas>
+</div>
+
+<div class="footer">SMART CHEF AI © 2024 · POWERED BY RASPBERRY PI PICO 2W</div>
+
+</div>
+
 <script>
 let L=[],D=[],curTH={idle:7000,cook:10000,warn:30000,danger:45000},threshLoaded=false;
-const ch=new Chart(document.getElementById('gC'),{type:'line',data:{labels:L,datasets:[{data:D,borderColor:'#f90',backgroundColor:'rgba(255,150,0,.1)',borderWidth:2,fill:true,tension:.3,pointRadius:0}]},options:{responsive:true,animation:{duration:100},scales:{x:{ticks:{color:'#555',maxTicksLimit:6},grid:{color:'#1a1a2e'}},y:{min:0,max:65535,ticks:{color:'#555'},grid:{color:'#1a1a2e'}}},plugins:{legend:{display:false}}}});
-function fmt(s){let m=Math.floor(Math.max(0,s)/60),sc=Math.floor(Math.max(0,s)%60);return String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0')}
-function updateDots(state,ratio){
-  let ds=document.querySelectorAll('.dot'),bl=Date.now()%600<300;
+
+const ch=new Chart(document.getElementById('gC'),{
+  type:'line',
+  data:{labels:L,datasets:[{
+    data:D,
+    borderColor:'#ff6b00',
+    backgroundColor:'rgba(255,107,0,.15)',
+    borderWidth:3,
+    fill:true,
+    tension:.4,
+    pointRadius:0,
+    pointHoverRadius:6,
+    pointHoverBackgroundColor:'#ff0080',
+    pointHoverBorderColor:'#fff'
+  }]},
+  options:{
+    responsive:true,
+    animation:{duration:300},
+    scales:{
+      x:{ticks:{color:'#666',maxTicksLimit:6,font:{family:'Orbitron'}},grid:{color:'rgba(255,107,0,.05)'}},
+      y:{min:0,max:65535,ticks:{color:'#666',font:{family:'Orbitron'}},grid:{color:'rgba(255,107,0,.05)'}}
+    },
+    plugins:{legend:{display:false}}
+  }
+});
+
+function fmt(s){
+  let m=Math.floor(Math.max(0,s)/60);
+  let sc=Math.floor(Math.max(0,s)%60);
+  return String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0');
+}
+
+function updateLEDs(state,ratio){
+  let ds=document.querySelectorAll('.led-dot');
+  let bl=Date.now()%600<300;
   ds.forEach((d,i)=>{
-    d.className='dot';d.style.opacity='1';
-    if(state==='idle')d.classList.add('d-g');
-    else if(state==='running'){if(i<Math.round((1-ratio)*10))d.classList.add('d-b');}
-    else if(state==='gas_warn'){if(bl)d.classList.add('d-y');}
-    else if(state==='timer_warn'){if(bl)d.classList.add('d-y');}
-    else if(state==='done'||state==='danger'){if(bl)d.classList.add('d-r');}
+    d.className='led-dot';
+    if(state==='idle')d.classList.add('led-on-g');
+    else if(state==='running'){
+      if(i<Math.round((1-ratio)*10))d.classList.add('led-on-b');
+    }
+    else if(state==='gas_warn'){if(bl)d.classList.add('led-on-y');}
+    else if(state==='timer_warn'){if(bl)d.classList.add('led-on-y');}
+    else if(state==='done'||state==='danger'){if(bl)d.classList.add('led-on-r');}
   });
 }
+
 async function applyTimer(){
   let m=parseInt(minN.value)||0,s=parseInt(secN.value)||0,total=m*60+s;
-  if(total<=0){alert('시간을 설정해주세요!');return;}
+  if(total<=0){alert('⚠️ 시간을 설정해주세요!');return;}
   let r=await fetch('/set_timer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration:total})});
   let j=await r.json();
   let msg=document.getElementById('timerMsg');
-  msg.style.color=j.ok?'#4f4':'#f44';
-  msg.textContent=j.ok?'적용! 가스 감지 시 자동 시작':'실패';
+  msg.style.color=j.ok?'#0f0':'#f44';
+  msg.textContent=j.ok?'✅ 타이머 적용! 가스 감지 시 자동 시작':'❌ 실패';
   setTimeout(()=>msg.textContent='',3000);
 }
+
 async function stopTimer(){
   await fetch('/stop_timer',{method:'POST'});
   let msg=document.getElementById('timerMsg');
-  msg.style.color='#f44';msg.textContent='타이머 중지됨';
+  msg.style.color='#f44';
+  msg.textContent='⏹ 타이머 중지됨';
   setTimeout(()=>msg.textContent='',3000);
 }
+
 async function applyThresh(){
   let data={idle:parseInt(idleN.value),cook:parseInt(cookN.value),warn:parseInt(warnN.value),danger:parseInt(dangerN.value)};
   let r=await fetch('/set_thresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   let j=await r.json();
   let msg=document.getElementById('threshMsg');
-  msg.style.color=j.ok?'#4f4':'#f44';
-  msg.textContent=j.ok?'임계값 적용됨!':'실패';
+  msg.style.color=j.ok?'#0f0':'#f44';
+  msg.textContent=j.ok?'✅ 임계값 적용됨!':'❌ 실패';
   if(j.ok){curTH=data;threshLoaded=true;}
   setTimeout(()=>msg.textContent='',3000);
 }
+
 async function fetchData(){
   try{
     let r=await fetch('/data');
     let j=await r.json();
     let v=j.value;
+
     if(j.thresholds&&!threshLoaded){
       let th=j.thresholds;curTH=th;
       idleR.value=idleN.value=idleV.textContent=th.idle;
@@ -340,47 +816,64 @@ async function fetchData(){
       dangerR.value=dangerN.value=dangerV.textContent=th.danger;
       threshLoaded=true;
     }
+
     L.push('');D.push(v);
     if(L.length>100){L.shift();D.shift();}
-    ch.update();
+    ch.update('none');
+
     document.getElementById('gV').textContent=v;
+
     let pct=Math.min(100,v/65535*100);
     let gbi=document.getElementById('gBI');
     gbi.style.width=pct+'%';
-    gbi.style.background=v<curTH.cook?'#4f4':v<curTH.warn?'#fa0':'#f22';
+    if(v<curTH.cook)gbi.style.background='linear-gradient(90deg,#0f0,#0a0)';
+    else if(v<curTH.warn)gbi.style.background='linear-gradient(90deg,#fa0,#c80)';
+    else gbi.style.background='linear-gradient(90deg,#f44,#a00)';
+
     let sb=document.getElementById('sB');
     let state=j.state,remaining=j.remaining,duration=j.duration;
+    let body=document.body;
+    body.classList.remove('alert-pulse');
 
-    // ★ 상태별 배지 (gas_warn, timer_warn 구분)
-    if(state==='danger'){sb.textContent='🚨 위험!';sb.className='badge b2';}
-    else if(state==='gas_warn'){sb.textContent='⚠️ 가스주의!';sb.className='badge b5';}
+    if(state==='danger'){
+      sb.textContent='🚨 위험!';sb.className='badge b2';
+      body.classList.add('alert-pulse');
+    }
+    else if(state==='gas_warn'){sb.textContent='⚠ 가스주의';sb.className='badge b5';}
     else if(state==='done'){sb.textContent='⏰ 종료!';sb.className='badge b4';}
-    else if(state==='timer_warn'){sb.textContent='⏰ 타이머임박!';sb.className='badge b1';}
+    else if(state==='timer_warn'){sb.textContent='⏰ 임박!';sb.className='badge b1';}
     else if(state==='running'){sb.textContent='🍳 요리중';sb.className='badge b3';}
     else{sb.textContent='✅ 대기중';sb.className='badge b0';}
 
+    let bigT=document.getElementById('bigT');
+    let tS=document.getElementById('tS');
+    let fill=document.getElementById('timerFill');
+
     if(remaining===null||remaining===undefined){
-      document.getElementById('bigT').textContent='--:--';
-      document.getElementById('tS').textContent='--:--';
-      document.getElementById('pI').style.width='0%';
-      updateDots('idle',0);
+      bigT.textContent='--:--';tS.textContent='--:--';
+      fill.style.strokeDashoffset='282.7';
+      updateLEDs('idle',0);
     }else{
-      document.getElementById('bigT').textContent=fmt(remaining);
-      document.getElementById('tS').textContent=fmt(remaining);
+      bigT.textContent=fmt(remaining);
+      tS.textContent=fmt(remaining);
       let ratio=remaining/duration;
-      let pi=document.getElementById('pI');
-      pi.style.width=(100*(1-ratio))+'%';
-      pi.style.background=remaining<=60?'#f22':remaining<=120?'#fa0':'#48f';
-      updateDots(state,ratio);
+      fill.style.strokeDashoffset=(282.7*(1-ratio))+'';
+      updateLEDs(state,ratio);
     }
   }catch(e){console.error('오류:',e);}
 }
+
 setInterval(fetchData,500);
 fetchData();
+
 setInterval(()=>{
   let bl=Date.now()%600<300;
-  document.querySelectorAll('.dot').forEach(d=>{
-    if(d.classList.contains('d-y')||d.classList.contains('d-r'))d.style.opacity=bl?'1':'0';
+  document.querySelectorAll('.led-dot').forEach(d=>{
+    if(d.classList.contains('led-on-y')||d.classList.contains('led-on-r')){
+      d.style.opacity=bl?'1':'.2';
+    }else{
+      d.style.opacity='1';
+    }
   });
 },150);
 </script>
@@ -454,7 +947,7 @@ def handle_client(cl):
                 TH_COOK   = int(data.get('cook',   TH_COOK))
                 TH_WARN   = int(data.get('warn',   TH_WARN))
                 TH_DANGER = int(data.get('danger', TH_DANGER))
-                print(f"임계값: idle={TH_IDLE} cook={TH_COOK} warn={TH_WARN} danger={TH_DANGER}")
+                print(f"임계값: {TH_IDLE} {TH_COOK} {TH_WARN} {TH_DANGER}")
                 cl.send(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n")
                 cl.send(b'{"ok":true}')
             except:
