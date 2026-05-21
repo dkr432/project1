@@ -140,7 +140,7 @@ def connect_wifi():
             wlan.disconnect()
     return None
 
-# ===== HTML (요리책 컨셉 + 3페이지!) =====
+# ===== HTML =====
 def get_html():
     return """<!DOCTYPE html>
 <html>
@@ -183,11 +183,12 @@ body{
 /* 떠다니는 요리 이모지 */
 .floating-emoji{
   position:fixed;
-  font-size:30px;
-  opacity:.15;
+  font-size:35px;
+  opacity:.18;
   pointer-events:none;
-  z-index:1;
+  z-index:5;
   animation:float 20s linear infinite;
+  filter:drop-shadow(0 2px 4px rgba(0,0,0,.3));
 }
 @keyframes float{
   0%{transform:translateY(100vh) rotate(0deg)}
@@ -638,13 +639,39 @@ h3{
 
 /* 모바일 */
 @media(max-width:600px){
-  .book{height:85vh}
-  .page{padding:25px 18px}
+  .book-wrap{padding:10px 5px}
+  .book{
+    height:82vh;
+    max-width:92%;
+  }
+  .page{padding:25px 18px;border-radius:5px 10px 10px 5px}
   .page-title{font-size:22px}
   .timer-ring{width:200px;height:200px}
   .timer-num{font-size:38px}
   .scard-v{font-size:18px}
   .cover-icon{font-size:45px}
+
+  /* 모바일에서 이모지 더 많이 보이도록 */
+  .floating-emoji{
+    font-size:28px;
+    opacity:.22;
+    z-index:5;
+  }
+
+  /* 책 양쪽에 이모지 공간 확보 */
+  .book{
+    box-shadow:
+      inset 5px 0 15px rgba(80,40,20,.3),
+      0 8px 25px rgba(0,0,0,.6),
+      0 15px 40px rgba(0,0,0,.4);
+  }
+}
+
+/* 더 작은 화면 */
+@media(max-width:400px){
+  .book-wrap{padding:5px 2px}
+  .book{max-width:96%;height:80vh}
+  .floating-emoji{font-size:24px;opacity:.25}
 }
 </style>
 </head>
@@ -653,21 +680,23 @@ h3{
 <div class="desk"></div>
 
 <!-- 떠다니는 이모지들 -->
-<div class="floating-emoji" style="left:5%;animation-delay:0s">🍳</div>
-<div class="floating-emoji" style="left:15%;animation-delay:3s">🍲</div>
-<div class="floating-emoji" style="left:25%;animation-delay:6s">🥘</div>
-<div class="floating-emoji" style="left:35%;animation-delay:1s">🍜</div>
-<div class="floating-emoji" style="left:45%;animation-delay:4s">🥕</div>
-<div class="floating-emoji" style="left:55%;animation-delay:7s">🧄</div>
-<div class="floating-emoji" style="left:65%;animation-delay:2s">🧅</div>
-<div class="floating-emoji" style="left:75%;animation-delay:5s">🥩</div>
-<div class="floating-emoji" style="left:85%;animation-delay:8s">🍅</div>
-<div class="floating-emoji" style="left:95%;animation-delay:9s">🌶️</div>
-<div class="floating-emoji" style="left:10%;animation-delay:11s">🥒</div>
-<div class="floating-emoji" style="left:30%;animation-delay:13s">🍆</div>
-<div class="floating-emoji" style="left:50%;animation-delay:15s">🫕</div>
-<div class="floating-emoji" style="left:70%;animation-delay:17s">🍕</div>
-<div class="floating-emoji" style="left:90%;animation-delay:19s">🥗</div>
+<div class="floating-emoji" style="left:2%;animation-delay:0s">🍳</div>
+<div class="floating-emoji" style="left:7%;animation-delay:3s">🍲</div>
+<div class="floating-emoji" style="left:4%;animation-delay:6s">🥘</div>
+<div class="floating-emoji" style="left:8%;animation-delay:9s">🍜</div>
+<div class="floating-emoji" style="left:3%;animation-delay:12s">🥕</div>
+<div class="floating-emoji" style="left:6%;animation-delay:15s">🧄</div>
+<div class="floating-emoji" style="left:1%;animation-delay:18s">🧅</div>
+<div class="floating-emoji" style="left:92%;animation-delay:1s">🥩</div>
+<div class="floating-emoji" style="left:95%;animation-delay:4s">🍅</div>
+<div class="floating-emoji" style="left:97%;animation-delay:7s">🌶️</div>
+<div class="floating-emoji" style="left:93%;animation-delay:10s">🥒</div>
+<div class="floating-emoji" style="left:96%;animation-delay:13s">🍆</div>
+<div class="floating-emoji" style="left:91%;animation-delay:16s">🫕</div>
+<div class="floating-emoji" style="left:98%;animation-delay:19s">🍕</div>
+<div class="floating-emoji" style="left:94%;animation-delay:22s">🥗</div>
+<div class="floating-emoji" style="left:50%;animation-delay:2s">🍞</div>
+<div class="floating-emoji" style="left:50%;animation-delay:14s">🥖</div>
 
 <div class="book-wrap">
   <div class="book">
@@ -864,13 +893,11 @@ function prevPage(){
   }
 }
 
-// 좌우 키보드로도 페이지 넘김
 document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight')nextPage();
   else if(e.key==='ArrowLeft')prevPage();
 });
 
-// 차트
 const ch=new Chart(document.getElementById('gC'),{
   type:'line',
   data:{labels:L,datasets:[{
