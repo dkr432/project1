@@ -45,38 +45,31 @@ def set_all(r, g, b):
 
 def update_led():
     t = time.ticks_ms()
-
     if last_gas >= TH_DANGER:
         b = (t // 80) % 2
         set_all(80, 0, 0) if b else clear_led()
         return
-
     if last_gas >= TH_WARN:
         b = (t // 500) % 2
         set_all(60, 30, 0) if b else clear_led()
         return
-
     if timer_running:
         elapsed   = time.ticks_diff(t, timer_start) / 1000
         remaining = max(0, timer_duration - elapsed)
-
         if remaining <= 0:
             b = (t // 300) % 2
             set_all(60, 0, 0) if b else clear_led()
             return
-
         if remaining <= 60:
             b = (t // 200) % 2
             set_all(50, 30, 0) if b else clear_led()
             return
-
         ratio  = elapsed / timer_duration
         on_cnt = max(0, int(NUM_LEDS * (1 - ratio)))
         for i in range(NUM_LEDS):
             led[i] = (0, 0, 50) if i < on_cnt else (0, 0, 0)
         led.write()
         return
-
     brightness = int((t % 3000) / 3000 * 25)
     if (t % 6000) >= 3000:
         brightness = 25 - brightness
@@ -87,7 +80,6 @@ def update_led():
 def get_state():
     elapsed   = time.ticks_diff(time.ticks_ms(), timer_start) / 1000 if timer_running else 0
     remaining = max(0, timer_duration - elapsed) if timer_running else None
-
     if last_gas >= TH_DANGER:
         return 'danger', remaining
     if last_gas >= TH_WARN:
@@ -148,215 +140,259 @@ def connect_wifi():
             wlan.disconnect()
     return None
 
-# ===== HTML (완전 리뉴얼!) =====
+# ===== HTML (요리책 컨셉 + 3페이지!) =====
 def get_html():
     return """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>🔥 SmartChef AI 🔥</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+<title>🍳 요리 비법서 🍳</title>
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Gowun+Batang:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
 body{
-  font-family:'Noto Sans KR',sans-serif;
-  background:#000;
-  color:#fff;
-  min-height:100vh;
+  font-family:'Gowun Batang','Nanum Myeongjo',serif;
+  background:#3a2418;
+  color:#3a2418;
+  perspective:2000px;
+}
+
+/* 책상 배경 */
+.desk{
+  position:fixed;
+  top:0;left:0;width:100%;height:100%;
+  background:
+    radial-gradient(ellipse at center,#5a3a26 0%,#3a2418 70%,#2a1810 100%);
+  z-index:0;
+}
+.desk::before{
+  content:'';
+  position:absolute;
+  top:0;left:0;width:100%;height:100%;
+  background-image:
+    repeating-linear-gradient(45deg,
+      rgba(0,0,0,.03) 0px,
+      rgba(0,0,0,.03) 2px,
+      transparent 2px,
+      transparent 8px);
+}
+
+/* 떠다니는 요리 이모지 */
+.floating-emoji{
+  position:fixed;
+  font-size:30px;
+  opacity:.15;
+  pointer-events:none;
+  z-index:1;
+  animation:float 20s linear infinite;
+}
+@keyframes float{
+  0%{transform:translateY(100vh) rotate(0deg)}
+  100%{transform:translateY(-100px) rotate(360deg)}
+}
+
+/* 책 컨테이너 */
+.book-wrap{
+  position:relative;
+  z-index:10;
+  width:100%;
+  height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+
+.book{
+  position:relative;
+  width:100%;
+  max-width:700px;
+  height:90vh;
+  max-height:900px;
+  transform-style:preserve-3d;
+}
+
+/* 페이지 */
+.page{
+  position:absolute;
+  top:0;left:0;
+  width:100%;
+  height:100%;
+  background:
+    linear-gradient(to right,#f0e0c0 0%,#f5e6cc 5%,#faecd4 100%);
+  border-radius:8px 15px 15px 8px;
+  padding:35px 30px;
+  box-shadow:
+    inset 5px 0 15px rgba(80,40,20,.3),
+    0 10px 40px rgba(0,0,0,.5),
+    0 20px 60px rgba(0,0,0,.3);
+  overflow-y:auto;
   overflow-x:hidden;
+  transform-origin:left center;
+  transition:transform 1s cubic-bezier(.4,0,.2,1);
+  backface-visibility:hidden;
+}
+
+/* 페이지 가장자리 */
+.page::before{
+  content:'';
+  position:absolute;
+  top:0;left:0;
+  width:30px;height:100%;
+  background:linear-gradient(to right,
+    rgba(120,80,40,.3),
+    rgba(120,80,40,.1) 40%,
+    transparent);
+  pointer-events:none;
+}
+.page::after{
+  content:'';
+  position:absolute;
+  top:0;right:0;
+  width:8px;height:100%;
+  background:linear-gradient(to left,
+    rgba(80,50,20,.4),
+    transparent);
+  pointer-events:none;
+}
+
+/* 종이 질감 */
+.page-inner{
   position:relative;
+  z-index:2;
 }
 
-/* 배경 애니메이션 */
-body::before{
-  content:'';
-  position:fixed;
-  top:0;left:0;width:100%;height:100%;
-  background:
-    radial-gradient(circle at 20% 30%,rgba(255,100,0,.15),transparent 50%),
-    radial-gradient(circle at 80% 70%,rgba(255,0,100,.15),transparent 50%),
-    radial-gradient(circle at 50% 50%,rgba(100,0,255,.1),transparent 50%);
-  animation:bgMove 15s ease infinite;
-  z-index:-2;
+.page.flipping{
+  transform:rotateY(-180deg);
 }
-@keyframes bgMove{
-  0%,100%{transform:scale(1) rotate(0deg)}
-  50%{transform:scale(1.2) rotate(180deg)}
+.page.flipped{
+  transform:rotateY(-180deg);
+  pointer-events:none;
 }
 
-/* 격자 배경 */
-body::after{
-  content:'';
-  position:fixed;
-  top:0;left:0;width:100%;height:100%;
-  background:
-    linear-gradient(rgba(255,150,0,.03) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,150,0,.03) 1px,transparent 1px);
-  background-size:40px 40px;
-  z-index:-1;
-  animation:gridMove 20s linear infinite;
-}
-@keyframes gridMove{
-  0%{background-position:0 0}
-  100%{background-position:40px 40px}
+.page.next-enter{
+  transform:rotateY(180deg);
 }
 
-.container{padding:20px;max-width:1200px;margin:0 auto}
+/* 페이지 1 보일 때 */
+.page-1{z-index:3}
+.page-2{z-index:2}
+.page-3{z-index:1}
 
-/* 헤더 */
-.header{
+/* 페이지 타이틀 */
+.page-title{
+  font-family:'Nanum Myeongjo',serif;
+  font-size:28px;
+  font-weight:800;
   text-align:center;
-  padding:30px 0 20px;
+  color:#5a2818;
+  margin-bottom:8px;
+  padding-bottom:15px;
+  border-bottom:3px double #8a4828;
   position:relative;
 }
-.header h1{
-  font-family:'Orbitron',sans-serif;
-  font-size:clamp(28px,5vw,48px);
-  font-weight:900;
-  background:linear-gradient(90deg,#ff6b00,#ff0080,#ff6b00);
-  background-size:200% 100%;
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  background-clip:text;
-  animation:shine 3s linear infinite;
-  letter-spacing:3px;
-  text-shadow:0 0 30px rgba(255,107,0,.5);
+.page-title::before,.page-title::after{
+  content:'❦';
+  margin:0 15px;
+  color:#8a4828;
+  font-size:20px;
 }
-@keyframes shine{
-  0%{background-position:0% 50%}
-  100%{background-position:200% 50%}
-}
-.header .sub{
+.page-num{
+  text-align:center;
   font-size:13px;
-  color:#888;
-  margin-top:8px;
-  letter-spacing:5px;
+  color:#8a6848;
+  margin-bottom:25px;
+  letter-spacing:3px;
+  font-style:italic;
 }
 
-/* 상태 카드 */
-.status-grid{
+/* 메인 페이지 (1) */
+.cover-icon{
+  text-align:center;
+  font-size:60px;
+  margin:10px 0;
+  filter:drop-shadow(2px 2px 4px rgba(0,0,0,.3));
+}
+
+.status-row{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:15px;
-  margin:25px 0;
+  grid-template-columns:repeat(3,1fr);
+  gap:10px;
+  margin:20px 0;
 }
 .scard{
-  background:linear-gradient(135deg,rgba(20,20,40,.9),rgba(40,20,40,.9));
-  border:1px solid rgba(255,107,0,.3);
-  border-radius:16px;
-  padding:20px;
+  background:linear-gradient(135deg,#faecd4,#e8d4b0);
+  border:2px solid #8a4828;
+  border-radius:10px;
+  padding:12px 8px;
   text-align:center;
   position:relative;
-  overflow:hidden;
-  backdrop-filter:blur(10px);
-  transition:all .3s;
-}
-.scard:hover{
-  transform:translateY(-5px);
-  border-color:rgba(255,107,0,.8);
-  box-shadow:0 10px 30px rgba(255,107,0,.3);
+  box-shadow:2px 2px 5px rgba(0,0,0,.2);
 }
 .scard::before{
   content:'';
   position:absolute;
-  top:-50%;left:-50%;width:200%;height:200%;
-  background:linear-gradient(45deg,transparent,rgba(255,107,0,.1),transparent);
-  animation:cardShine 4s linear infinite;
-}
-@keyframes cardShine{
-  0%{transform:translateX(-100%) translateY(-100%)}
-  100%{transform:translateX(100%) translateY(100%)}
+  top:5px;left:5px;right:5px;bottom:5px;
+  border:1px solid rgba(138,72,40,.3);
+  border-radius:8px;
+  pointer-events:none;
 }
 .scard-lb{
-  font-size:11px;
-  color:#888;
-  letter-spacing:2px;
-  margin-bottom:8px;
-  text-transform:uppercase;
+  font-size:10px;
+  color:#8a6848;
+  margin-bottom:5px;
+  letter-spacing:1px;
+  font-weight:700;
 }
 .scard-v{
-  font-family:'Orbitron',sans-serif;
-  font-size:36px;
-  font-weight:900;
-  background:linear-gradient(135deg,#ff6b00,#ff0080);
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  background-clip:text;
+  font-family:'Nanum Myeongjo',serif;
+  font-size:22px;
+  font-weight:800;
+  color:#5a2818;
 }
 
 /* 배지 */
 .badge{
   display:inline-block;
-  padding:8px 20px;
+  padding:6px 16px;
   border-radius:20px;
-  font-size:13px;
-  font-weight:900;
-  letter-spacing:2px;
-  text-transform:uppercase;
+  font-size:12px;
+  font-weight:800;
+  border:2px solid;
 }
-.b0{background:linear-gradient(135deg,#0a7d3a,#0e9d4a);box-shadow:0 0 20px rgba(15,200,80,.5)}
-.b1{background:linear-gradient(135deg,#cc6600,#ff8800);box-shadow:0 0 20px rgba(255,150,0,.6);animation:p .5s infinite}
-.b2{background:linear-gradient(135deg,#cc0000,#ff0044);box-shadow:0 0 30px rgba(255,0,68,.8);animation:p .3s infinite}
-.b3{background:linear-gradient(135deg,#0044cc,#0080ff);box-shadow:0 0 20px rgba(0,128,255,.6)}
-.b4{background:linear-gradient(135deg,#ff4400,#ff8800);box-shadow:0 0 25px rgba(255,100,0,.7);animation:p .4s infinite}
-.b5{background:linear-gradient(135deg,#ffaa00,#ffdd00);color:#000;box-shadow:0 0 25px rgba(255,200,0,.7);animation:p .5s infinite}
-@keyframes p{50%{opacity:.4;transform:scale(.95)}}
+.b0{background:#d4e8b8;color:#2e5e0e;border-color:#2e5e0e}
+.b1{background:#f5d4a0;color:#7e3e0e;border-color:#7e3e0e;animation:p .5s infinite}
+.b2{background:#f5b8b8;color:#7e0e0e;border-color:#7e0e0e;animation:p .3s infinite}
+.b3{background:#b8d4f5;color:#0e3e7e;border-color:#0e3e7e}
+.b4{background:#f5c8a0;color:#7e3e0e;border-color:#7e3e0e;animation:p .4s infinite}
+.b5{background:#f5e8a0;color:#7e6e0e;border-color:#7e6e0e;animation:p .5s infinite}
+@keyframes p{50%{opacity:.5}}
 
-/* 박스 */
-.box{
-  background:linear-gradient(135deg,rgba(15,15,30,.95),rgba(30,15,30,.95));
-  border:1px solid rgba(255,107,0,.2);
-  border-radius:20px;
-  padding:25px;
-  margin:20px 0;
-  position:relative;
-  backdrop-filter:blur(15px);
-  box-shadow:0 8px 32px rgba(0,0,0,.5);
-}
-.box h2{
-  font-family:'Orbitron',sans-serif;
-  color:#ff6b00;
-  font-size:16px;
-  letter-spacing:3px;
-  margin-bottom:20px;
-  text-transform:uppercase;
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-.box h2::before{
-  content:'';
-  width:4px;height:24px;
-  background:linear-gradient(180deg,#ff6b00,#ff0080);
-  border-radius:2px;
-  box-shadow:0 0 10px rgba(255,107,0,.8);
-}
-
-/* 메인 타이머 */
-.timer-main{
+/* 타이머 (1페이지 메인) */
+.timer-wrap{
   text-align:center;
-  padding:30px 0;
-  position:relative;
+  margin:20px 0;
 }
 .timer-ring{
-  width:280px;height:280px;
-  margin:0 auto 20px;
+  width:240px;height:240px;
+  margin:0 auto 15px;
   position:relative;
 }
 .timer-svg{
   width:100%;height:100%;
   transform:rotate(-90deg);
-  filter:drop-shadow(0 0 20px rgba(255,107,0,.5));
 }
-.timer-bg{fill:none;stroke:rgba(255,255,255,.05);stroke-width:8}
+.timer-bg{fill:none;stroke:#d4b890;stroke-width:6}
 .timer-fill{
   fill:none;
-  stroke:url(#grad1);
-  stroke-width:8;
+  stroke:#8a4828;
+  stroke-width:6;
   stroke-linecap:round;
   transition:stroke-dashoffset .5s ease;
+  filter:drop-shadow(0 0 5px rgba(138,72,40,.5));
 }
 .timer-center{
   position:absolute;
@@ -365,387 +401,493 @@ body::after{
   text-align:center;
 }
 .timer-num{
-  font-family:'Orbitron',sans-serif;
-  font-size:56px;
-  font-weight:900;
-  color:#fff;
-  text-shadow:0 0 30px rgba(255,107,0,.8);
+  font-family:'Nanum Myeongjo',serif;
+  font-size:48px;
+  font-weight:800;
+  color:#5a2818;
   line-height:1;
 }
 .timer-lb{
   font-size:11px;
-  color:#888;
-  letter-spacing:3px;
-  margin-top:8px;
+  color:#8a6848;
+  margin-top:5px;
+  letter-spacing:2px;
 }
 
-/* LED 시뮬레이션 */
 .led-strip{
   display:flex;
   justify-content:center;
-  gap:8px;
-  margin:20px 0;
-  padding:15px;
-  background:rgba(0,0,0,.5);
-  border-radius:15px;
-  border:1px solid rgba(255,107,0,.2);
+  gap:6px;
+  padding:10px;
+  background:#3a2418;
+  border-radius:20px;
+  margin:15px auto;
+  width:fit-content;
+  border:2px solid #8a4828;
 }
 .led-dot{
-  width:24px;height:24px;
+  width:18px;height:18px;
   border-radius:50%;
-  background:#1a1a2e;
-  border:2px solid #333;
-  transition:all .2s;
-  position:relative;
+  background:#1a1a1a;
+  border:1px solid #4a3a2a;
+  transition:all .3s;
 }
-.led-dot::after{
-  content:'';
-  position:absolute;
-  top:-3px;left:-3px;right:-3px;bottom:-3px;
-  border-radius:50%;
-  opacity:0;
-  transition:opacity .3s;
-}
-.led-on-g{background:radial-gradient(#0f0,#080);box-shadow:0 0 15px #0f0,0 0 30px rgba(0,255,0,.5)}
-.led-on-b{background:radial-gradient(#48f,#06c);box-shadow:0 0 15px #48f,0 0 30px rgba(50,150,255,.5)}
-.led-on-y{background:radial-gradient(#fa0,#c80);box-shadow:0 0 15px #fa0,0 0 30px rgba(255,170,0,.5)}
-.led-on-r{background:radial-gradient(#f22,#a00);box-shadow:0 0 20px #f22,0 0 40px rgba(255,30,30,.7)}
+.led-on-g{background:radial-gradient(#0f0,#080);box-shadow:0 0 10px #0f0}
+.led-on-b{background:radial-gradient(#48f,#06c);box-shadow:0 0 10px #48f}
+.led-on-y{background:radial-gradient(#fa0,#c80);box-shadow:0 0 10px #fa0}
+.led-on-r{background:radial-gradient(#f22,#a00);box-shadow:0 0 12px #f22}
 
-/* 컨트롤 */
-.row{
-  display:flex;
-  align-items:center;
-  gap:15px;
+/* 타이머 설정 (1페이지) */
+.timer-setting{
+  background:rgba(212,184,144,.2);
+  border:1px dashed #8a4828;
+  border-radius:10px;
+  padding:15px;
   margin:15px 0;
-  flex-wrap:wrap;
-}
-.row label{
-  color:#aaa;
-  font-size:13px;
-  min-width:120px;
-  font-weight:700;
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-.cur-val{
-  font-family:'Orbitron',sans-serif;
-  color:#ff6b00;
-  font-weight:900;
-  font-size:14px;
 }
 
 /* 슬라이더 */
+.row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:10px 0;
+  flex-wrap:wrap;
+}
+.row label{
+  color:#5a2818;
+  font-size:13px;
+  font-weight:700;
+  min-width:100px;
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+.cur-val{
+  color:#a04818;
+  font-weight:800;
+  background:#faecd4;
+  padding:2px 8px;
+  border-radius:4px;
+  border:1px solid #8a4828;
+}
 input[type=range]{
   flex:1;
-  min-width:150px;
+  min-width:120px;
   -webkit-appearance:none;
   appearance:none;
-  height:8px;
-  background:linear-gradient(90deg,#1a1a2e,#2a1a3e);
-  border-radius:4px;
+  height:6px;
+  background:#d4b890;
+  border-radius:3px;
   outline:none;
-  cursor:pointer;
+  border:1px solid #8a4828;
 }
 input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none;
-  width:22px;height:22px;
-  background:linear-gradient(135deg,#ff6b00,#ff0080);
+  width:18px;height:18px;
+  background:radial-gradient(#c08858,#8a4828);
   border-radius:50%;
   cursor:pointer;
-  box-shadow:0 0 15px rgba(255,107,0,.8);
-  transition:transform .2s;
+  border:2px solid #5a2818;
+  box-shadow:0 2px 4px rgba(0,0,0,.3);
 }
-input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.3)}
 input[type=range]::-moz-range-thumb{
-  width:22px;height:22px;
-  background:linear-gradient(135deg,#ff6b00,#ff0080);
+  width:18px;height:18px;
+  background:radial-gradient(#c08858,#8a4828);
   border-radius:50%;
   cursor:pointer;
-  border:none;
-  box-shadow:0 0 15px rgba(255,107,0,.8);
+  border:2px solid #5a2818;
 }
-
 input[type=number]{
-  background:rgba(0,0,0,.5);
-  border:1px solid rgba(255,107,0,.3);
-  color:#ff6b00;
-  padding:8px 12px;
-  border-radius:8px;
-  width:90px;
-  font-size:14px;
-  font-family:'Orbitron',sans-serif;
+  background:#faecd4;
+  border:2px solid #8a4828;
+  color:#5a2818;
+  padding:5px 8px;
+  border-radius:5px;
+  width:70px;
+  font-family:'Nanum Myeongjo',serif;
   font-weight:700;
   text-align:center;
-}
-input[type=number]:focus{
-  outline:none;
-  border-color:#ff6b00;
-  box-shadow:0 0 15px rgba(255,107,0,.5);
+  font-size:13px;
 }
 
 /* 버튼 */
 .btn{
-  padding:12px 28px;
-  border:none;
-  border-radius:10px;
-  font-size:14px;
-  font-weight:900;
+  padding:10px 20px;
+  border:2px solid;
+  border-radius:8px;
+  font-family:'Nanum Myeongjo',serif;
+  font-size:13px;
+  font-weight:800;
   cursor:pointer;
-  margin:5px;
-  letter-spacing:2px;
-  text-transform:uppercase;
-  transition:all .3s;
-  position:relative;
-  overflow:hidden;
+  margin:4px;
+  transition:all .2s;
+  box-shadow:2px 2px 0 rgba(0,0,0,.2);
 }
-.btn::before{
-  content:'';
-  position:absolute;
-  top:0;left:-100%;width:100%;height:100%;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
-  transition:left .5s;
-}
-.btn:hover::before{left:100%}
-.btn:hover{transform:translateY(-2px)}
-.btn:active{transform:translateY(0)}
-.btn-o{
-  background:linear-gradient(135deg,#ff6b00,#ff0080);
-  color:#fff;
-  box-shadow:0 5px 20px rgba(255,107,0,.4);
-}
-.btn-o:hover{box-shadow:0 8px 30px rgba(255,107,0,.6)}
-.btn-r{
-  background:linear-gradient(135deg,#cc0000,#ff0044);
-  color:#fff;
-  box-shadow:0 5px 20px rgba(255,0,68,.4);
-}
-.btn-r:hover{box-shadow:0 8px 30px rgba(255,0,68,.6)}
-.btn-b{
-  background:linear-gradient(135deg,#0044cc,#0080ff);
-  color:#fff;
-  box-shadow:0 5px 20px rgba(0,128,255,.4);
-}
-.btn-b:hover{box-shadow:0 8px 30px rgba(0,128,255,.6)}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 rgba(0,0,0,.3)}
+.btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 rgba(0,0,0,.2)}
+.btn-o{background:#f5c896;color:#5a2818;border-color:#5a2818}
+.btn-r{background:#f5a8a8;color:#5a0808;border-color:#5a0808}
+.btn-b{background:#a8c8f5;color:#082858;border-color:#082858}
 
 .msg{
-  font-size:14px;
-  margin-top:12px;
-  min-height:20px;
+  font-size:12px;
+  margin-top:8px;
+  min-height:16px;
   font-weight:700;
-  letter-spacing:1px;
+  text-align:center;
 }
 
-/* 가스 미터 */
+/* 가스 미터 (3페이지) */
 .gas-meter{
-  height:30px;
-  background:linear-gradient(90deg,#0a0a1e,#1a0a2e);
-  border-radius:15px;
+  height:24px;
+  background:#3a2418;
+  border-radius:12px;
   overflow:hidden;
-  margin:15px 0;
+  margin:12px 0;
+  border:2px solid #5a2818;
   position:relative;
-  border:1px solid rgba(255,107,0,.2);
-  box-shadow:inset 0 2px 10px rgba(0,0,0,.5);
 }
 .gas-fill{
   height:100%;
-  border-radius:15px;
+  border-radius:12px;
   transition:width .5s,background .3s;
-  position:relative;
-  overflow:hidden;
 }
-.gas-fill::after{
-  content:'';
-  position:absolute;
-  top:0;left:0;right:0;bottom:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
-  animation:gasShine 2s linear infinite;
-}
-@keyframes gasShine{
-  0%{transform:translateX(-100%)}
-  100%{transform:translateX(100%)}
+
+.meter-labels{
+  display:flex;
+  justify-content:space-between;
+  font-size:10px;
+  color:#5a2818;
+  margin-top:5px;
+  font-weight:700;
 }
 
 /* 차트 */
 .chart-box{
-  background:linear-gradient(135deg,rgba(10,10,30,.95),rgba(20,10,30,.95));
-  border-radius:20px;
-  padding:25px;
-  margin:20px 0;
-  border:1px solid rgba(255,107,0,.2);
-  box-shadow:0 8px 32px rgba(0,0,0,.5);
+  background:#faecd4;
+  border:2px solid #8a4828;
+  border-radius:10px;
+  padding:15px;
+  margin:15px 0;
 }
 
-/* 알림 효과 */
-@keyframes pulseAlert{
-  0%,100%{transform:scale(1)}
-  50%{transform:scale(1.02)}
+/* 페이지 네비게이션 */
+.nav{
+  position:fixed;
+  bottom:20px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:10px;
+  z-index:100;
+  background:rgba(58,36,24,.9);
+  padding:10px 15px;
+  border-radius:30px;
+  border:2px solid #8a4828;
+  box-shadow:0 5px 20px rgba(0,0,0,.5);
 }
-.alert-pulse{animation:pulseAlert 1s infinite}
+.nav-btn{
+  width:40px;height:40px;
+  border-radius:50%;
+  border:2px solid #faecd4;
+  background:#5a2818;
+  color:#faecd4;
+  font-size:18px;
+  font-weight:800;
+  cursor:pointer;
+  transition:all .2s;
+}
+.nav-btn:hover:not(:disabled){background:#8a4828;transform:scale(1.1)}
+.nav-btn:disabled{opacity:.3;cursor:not-allowed}
+.nav-dots{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.nav-dot{
+  width:10px;height:10px;
+  border-radius:50%;
+  background:#faecd4;
+  opacity:.4;
+  transition:all .3s;
+}
+.nav-dot.active{
+  opacity:1;
+  background:#ffa500;
+  transform:scale(1.3);
+}
 
-/* 푸터 */
-.footer{
+/* 장식 요소 */
+.deco{
   text-align:center;
-  padding:30px 0;
-  color:#555;
-  font-size:11px;
-  letter-spacing:3px;
+  color:#8a4828;
+  font-size:14px;
+  margin:15px 0;
+  letter-spacing:5px;
 }
 
-/* 반응형 */
+h3{
+  font-family:'Nanum Myeongjo',serif;
+  color:#5a2818;
+  font-size:16px;
+  margin:15px 0 10px;
+  padding-left:8px;
+  border-left:4px solid #8a4828;
+}
+
+/* 모바일 */
 @media(max-width:600px){
-  .timer-ring{width:220px;height:220px}
-  .timer-num{font-size:42px}
-  .header h1{font-size:28px;letter-spacing:1px}
+  .book{height:85vh}
+  .page{padding:25px 18px}
+  .page-title{font-size:22px}
+  .timer-ring{width:200px;height:200px}
+  .timer-num{font-size:38px}
+  .scard-v{font-size:18px}
+  .cover-icon{font-size:45px}
 }
 </style>
 </head>
 <body>
-<div class="container">
 
-<div class="header">
-  <h1>🔥 SMART CHEF AI 🔥</h1>
-  <div class="sub">REAL-TIME COOKING SAFETY SYSTEM</div>
-</div>
+<div class="desk"></div>
 
-<div class="status-grid">
-  <div class="scard">
-    <div class="scard-lb">GAS LEVEL</div>
-    <div class="scard-v" id="gV">--</div>
-  </div>
-  <div class="scard">
-    <div class="scard-lb">STATUS</div>
-    <div style="margin-top:10px"><span class="badge b0" id="sB">대기중</span></div>
-  </div>
-  <div class="scard">
-    <div class="scard-lb">REMAINING</div>
-    <div class="scard-v" id="tS" style="background:linear-gradient(135deg,#0080ff,#0044cc);-webkit-background-clip:text;-webkit-text-fill-color:transparent">--:--</div>
-  </div>
-</div>
+<!-- 떠다니는 이모지들 -->
+<div class="floating-emoji" style="left:5%;animation-delay:0s">🍳</div>
+<div class="floating-emoji" style="left:15%;animation-delay:3s">🍲</div>
+<div class="floating-emoji" style="left:25%;animation-delay:6s">🥘</div>
+<div class="floating-emoji" style="left:35%;animation-delay:1s">🍜</div>
+<div class="floating-emoji" style="left:45%;animation-delay:4s">🥕</div>
+<div class="floating-emoji" style="left:55%;animation-delay:7s">🧄</div>
+<div class="floating-emoji" style="left:65%;animation-delay:2s">🧅</div>
+<div class="floating-emoji" style="left:75%;animation-delay:5s">🥩</div>
+<div class="floating-emoji" style="left:85%;animation-delay:8s">🍅</div>
+<div class="floating-emoji" style="left:95%;animation-delay:9s">🌶️</div>
+<div class="floating-emoji" style="left:10%;animation-delay:11s">🥒</div>
+<div class="floating-emoji" style="left:30%;animation-delay:13s">🍆</div>
+<div class="floating-emoji" style="left:50%;animation-delay:15s">🫕</div>
+<div class="floating-emoji" style="left:70%;animation-delay:17s">🍕</div>
+<div class="floating-emoji" style="left:90%;animation-delay:19s">🥗</div>
 
-<div class="box">
-  <h2>⏱ COOKING TIMER</h2>
-  <div class="timer-main">
-    <div class="timer-ring">
-      <svg class="timer-svg" viewBox="0 0 100 100">
-        <defs>
-          <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" style="stop-color:#ff6b00"/>
-            <stop offset="50%" style="stop-color:#ff0080"/>
-            <stop offset="100%" style="stop-color:#8000ff"/>
-          </linearGradient>
-        </defs>
-        <circle class="timer-bg" cx="50" cy="50" r="45"/>
-        <circle class="timer-fill" id="timerFill" cx="50" cy="50" r="45"
-                stroke-dasharray="282.7" stroke-dashoffset="282.7"/>
-      </svg>
-      <div class="timer-center">
-        <div class="timer-num" id="bigT">--:--</div>
-        <div class="timer-lb">REMAINING</div>
+<div class="book-wrap">
+  <div class="book">
+
+    <!-- ===== 페이지 1 : 메인 ===== -->
+    <div class="page page-1" id="p1">
+      <div class="page-inner">
+        <div class="cover-icon">🍳📖</div>
+        <h1 class="page-title">요리 비법서</h1>
+        <div class="page-num">~ 第 一 章 · 요리 시작 ~</div>
+
+        <div class="status-row">
+          <div class="scard">
+            <div class="scard-lb">🔥 가스 수치</div>
+            <div class="scard-v" id="gV">--</div>
+          </div>
+          <div class="scard">
+            <div class="scard-lb">📜 상태</div>
+            <div style="margin-top:6px"><span class="badge b0" id="sB">대기중</span></div>
+          </div>
+          <div class="scard">
+            <div class="scard-lb">⏳ 남은 시간</div>
+            <div class="scard-v" id="tS">--:--</div>
+          </div>
+        </div>
+
+        <div class="deco">⊰ ❀ ⊱</div>
+
+        <div class="timer-wrap">
+          <div class="timer-ring">
+            <svg class="timer-svg" viewBox="0 0 100 100">
+              <circle class="timer-bg" cx="50" cy="50" r="45"/>
+              <circle class="timer-fill" id="timerFill" cx="50" cy="50" r="45"
+                      stroke-dasharray="282.7" stroke-dashoffset="282.7"/>
+            </svg>
+            <div class="timer-center">
+              <div class="timer-num" id="bigT">--:--</div>
+              <div class="timer-lb">남은 시간</div>
+            </div>
+          </div>
+
+          <div class="led-strip">
+            <div class="led-dot"></div><div class="led-dot"></div>
+            <div class="led-dot"></div><div class="led-dot"></div>
+            <div class="led-dot"></div><div class="led-dot"></div>
+            <div class="led-dot"></div><div class="led-dot"></div>
+            <div class="led-dot"></div><div class="led-dot"></div>
+          </div>
+        </div>
+
+        <div class="timer-setting">
+          <h3>⏱ 타이머 설정</h3>
+          <div class="row">
+            <label>분 <span class="cur-val" id="minV">10</span></label>
+            <input type="range" id="minR" min="0" max="60" value="10" oninput="minN.value=this.value;minV.textContent=this.value">
+            <input type="number" id="minN" value="10" min="0" max="60" oninput="minR.value=this.value;minV.textContent=this.value">
+          </div>
+          <div class="row">
+            <label>초 <span class="cur-val" id="secV">0</span></label>
+            <input type="range" id="secR" min="0" max="59" value="0" oninput="secN.value=this.value;secV.textContent=this.value">
+            <input type="number" id="secN" value="0" min="0" max="59" oninput="secR.value=this.value;secV.textContent=this.value">
+          </div>
+          <div style="text-align:center;margin-top:10px">
+            <button class="btn btn-o" onclick="applyTimer()">✅ 적용</button>
+            <button class="btn btn-r" onclick="stopTimer()">⏹ 중지</button>
+          </div>
+          <div class="msg" id="timerMsg"></div>
+        </div>
       </div>
     </div>
 
-    <div class="led-strip">
-      <div class="led-dot"></div><div class="led-dot"></div>
-      <div class="led-dot"></div><div class="led-dot"></div>
-      <div class="led-dot"></div><div class="led-dot"></div>
-      <div class="led-dot"></div><div class="led-dot"></div>
-      <div class="led-dot"></div><div class="led-dot"></div>
+    <!-- ===== 페이지 2 : 임계값 ===== -->
+    <div class="page page-2" id="p2">
+      <div class="page-inner">
+        <div class="cover-icon">⚙️📜</div>
+        <h1 class="page-title">감지 비법</h1>
+        <div class="page-num">~ 第 二 章 · 임계값 조절 ~</div>
+
+        <div class="deco">⊰ 🌿 ⊱</div>
+
+        <h3>💨 가스없음 기준</h3>
+        <div class="row">
+          <label>수치 <span class="cur-val" id="idleV">7000</span></label>
+          <input type="range" id="idleR" min="1000" max="20000" step="500" value="7000" oninput="idleV.textContent=this.value;idleN.value=this.value">
+          <input type="number" id="idleN" value="7000" min="1000" max="20000" oninput="idleR.value=this.value;idleV.textContent=this.value">
+        </div>
+
+        <h3>🍳 요리감지 기준</h3>
+        <div class="row">
+          <label>수치 <span class="cur-val" id="cookV">10000</span></label>
+          <input type="range" id="cookR" min="1000" max="40000" step="500" value="10000" oninput="cookV.textContent=this.value;cookN.value=this.value">
+          <input type="number" id="cookN" value="10000" min="1000" max="40000" oninput="cookR.value=this.value;cookV.textContent=this.value">
+        </div>
+
+        <h3>⚠️ 주의 기준</h3>
+        <div class="row">
+          <label>수치 <span class="cur-val" id="warnV">30000</span></label>
+          <input type="range" id="warnR" min="5000" max="60000" step="500" value="30000" oninput="warnV.textContent=this.value;warnN.value=this.value">
+          <input type="number" id="warnN" value="30000" min="5000" max="60000" oninput="warnR.value=this.value;warnV.textContent=this.value">
+        </div>
+
+        <h3>🚨 위험 기준</h3>
+        <div class="row">
+          <label>수치 <span class="cur-val" id="dangerV">45000</span></label>
+          <input type="range" id="dangerR" min="10000" max="65000" step="500" value="45000" oninput="dangerV.textContent=this.value;dangerN.value=this.value">
+          <input type="number" id="dangerN" value="45000" min="10000" max="65000" oninput="dangerR.value=this.value;dangerV.textContent=this.value">
+        </div>
+
+        <div class="deco">⊰ ❀ ⊱</div>
+
+        <div style="text-align:center;margin-top:15px">
+          <button class="btn btn-b" onclick="applyThresh()">✅ 비법 적용</button>
+        </div>
+        <div class="msg" id="threshMsg"></div>
+      </div>
     </div>
+
+    <!-- ===== 페이지 3 : 그래프 ===== -->
+    <div class="page page-3" id="p3">
+      <div class="page-inner">
+        <div class="cover-icon">📊📈</div>
+        <h1 class="page-title">감지 기록부</h1>
+        <div class="page-num">~ 第 三 章 · 실시간 측정 ~</div>
+
+        <div class="deco">⊰ 🔥 ⊱</div>
+
+        <h3>💨 현재 가스 농도</h3>
+        <div class="gas-meter"><div class="gas-fill" id="gBI" style="width:0%;background:linear-gradient(90deg,#5a8a3a,#8aba5a)"></div></div>
+        <div class="meter-labels">
+          <span>0</span>
+          <span style="color:#2e5e0e">🌿 안전</span>
+          <span style="color:#7e3e0e">⚠ 주의</span>
+          <span style="color:#7e0e0e">🚨 위험</span>
+          <span>65535</span>
+        </div>
+
+        <h3>📜 시간별 변화 기록</h3>
+        <div class="chart-box">
+          <canvas id="gC"></canvas>
+        </div>
+
+        <div class="deco">⊰ 끝 ⊱</div>
+      </div>
+    </div>
+
   </div>
 </div>
 
-<div class="box">
-  <h2>⚙ TIMER SETTINGS</h2>
-  <div class="row">
-    <label>⏰ MINUTES <span class="cur-val" id="minV">10</span></label>
-    <input type="range" id="minR" min="0" max="60" value="10" oninput="minN.value=this.value;minV.textContent=this.value">
-    <input type="number" id="minN" value="10" min="0" max="60" oninput="minR.value=this.value;minV.textContent=this.value">
+<!-- 페이지 네비게이션 -->
+<div class="nav">
+  <button class="nav-btn" id="prevBtn" onclick="prevPage()">◀</button>
+  <div class="nav-dots">
+    <div class="nav-dot active" id="dot0"></div>
+    <div class="nav-dot" id="dot1"></div>
+    <div class="nav-dot" id="dot2"></div>
   </div>
-  <div class="row">
-    <label>⏱ SECONDS <span class="cur-val" id="secV">0</span></label>
-    <input type="range" id="secR" min="0" max="59" value="0" oninput="secN.value=this.value;secV.textContent=this.value">
-    <input type="number" id="secN" value="0" min="0" max="59" oninput="secR.value=this.value;secV.textContent=this.value">
-  </div>
-  <div style="margin-top:15px">
-    <button class="btn btn-o" onclick="applyTimer()">✅ 타이머 적용</button>
-    <button class="btn btn-r" onclick="stopTimer()">⏹ 중지</button>
-  </div>
-  <div class="msg" id="timerMsg"></div>
-</div>
-
-<div class="box">
-  <h2>🎚 SENSOR THRESHOLDS</h2>
-  <div class="row">
-    <label>💨 가스없음 <span class="cur-val" id="idleV">7000</span></label>
-    <input type="range" id="idleR" min="1000" max="20000" step="500" value="7000" oninput="idleV.textContent=this.value;idleN.value=this.value">
-    <input type="number" id="idleN" value="7000" min="1000" max="20000" oninput="idleR.value=this.value;idleV.textContent=this.value">
-  </div>
-  <div class="row">
-    <label>🍳 요리감지 <span class="cur-val" id="cookV">10000</span></label>
-    <input type="range" id="cookR" min="1000" max="40000" step="500" value="10000" oninput="cookV.textContent=this.value;cookN.value=this.value">
-    <input type="number" id="cookN" value="10000" min="1000" max="40000" oninput="cookR.value=this.value;cookV.textContent=this.value">
-  </div>
-  <div class="row">
-    <label>⚠ 주의 <span class="cur-val" id="warnV">30000</span></label>
-    <input type="range" id="warnR" min="5000" max="60000" step="500" value="30000" oninput="warnV.textContent=this.value;warnN.value=this.value">
-    <input type="number" id="warnN" value="30000" min="5000" max="60000" oninput="warnR.value=this.value;warnV.textContent=this.value">
-  </div>
-  <div class="row">
-    <label>🚨 위험 <span class="cur-val" id="dangerV">45000</span></label>
-    <input type="range" id="dangerR" min="10000" max="65000" step="500" value="45000" oninput="dangerV.textContent=this.value;dangerN.value=this.value">
-    <input type="number" id="dangerN" value="45000" min="10000" max="65000" oninput="dangerR.value=this.value;dangerV.textContent=this.value">
-  </div>
-  <div style="margin-top:15px">
-    <button class="btn btn-b" onclick="applyThresh()">✅ 임계값 적용</button>
-  </div>
-  <div class="msg" id="threshMsg"></div>
-</div>
-
-<div class="box">
-  <h2>📊 LIVE GAS METER</h2>
-  <div class="gas-meter"><div class="gas-fill" id="gBI" style="width:0%;background:linear-gradient(90deg,#0f0,#0a0)"></div></div>
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:8px;letter-spacing:1px">
-    <span>0</span>
-    <span style="color:#0f0">SAFE</span>
-    <span style="color:#fa0">WARN</span>
-    <span style="color:#f22">DANGER</span>
-    <span>65535</span>
-  </div>
-</div>
-
-<div class="chart-box">
-  <h2 style="font-family:'Orbitron';color:#ff6b00;font-size:16px;letter-spacing:3px;margin-bottom:15px">📈 GAS LEVEL HISTORY</h2>
-  <canvas id="gC"></canvas>
-</div>
-
-<div class="footer">SMART CHEF AI © 2024 · POWERED BY RASPBERRY PI PICO 2W</div>
-
+  <button class="nav-btn" id="nextBtn" onclick="nextPage()">▶</button>
 </div>
 
 <script>
 let L=[],D=[],curTH={idle:7000,cook:10000,warn:30000,danger:45000},threshLoaded=false;
+let currentPage=0;
+const pages=[document.getElementById('p1'),document.getElementById('p2'),document.getElementById('p3')];
 
+function updateNav(){
+  document.getElementById('prevBtn').disabled=currentPage===0;
+  document.getElementById('nextBtn').disabled=currentPage===2;
+  for(let i=0;i<3;i++){
+    document.getElementById('dot'+i).classList.toggle('active',i===currentPage);
+  }
+}
+
+function nextPage(){
+  if(currentPage<2){
+    pages[currentPage].classList.add('flipping');
+    setTimeout(()=>{
+      pages[currentPage].classList.remove('flipping');
+      pages[currentPage].classList.add('flipped');
+      currentPage++;
+      updateNav();
+    },500);
+  }
+}
+
+function prevPage(){
+  if(currentPage>0){
+    currentPage--;
+    pages[currentPage].classList.remove('flipped');
+    pages[currentPage].classList.add('flipping');
+    setTimeout(()=>{
+      pages[currentPage].classList.remove('flipping');
+      updateNav();
+    },50);
+  }
+}
+
+// 좌우 키보드로도 페이지 넘김
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight')nextPage();
+  else if(e.key==='ArrowLeft')prevPage();
+});
+
+// 차트
 const ch=new Chart(document.getElementById('gC'),{
   type:'line',
   data:{labels:L,datasets:[{
     data:D,
-    borderColor:'#ff6b00',
-    backgroundColor:'rgba(255,107,0,.15)',
-    borderWidth:3,
+    borderColor:'#8a4828',
+    backgroundColor:'rgba(138,72,40,.15)',
+    borderWidth:2,
     fill:true,
     tension:.4,
-    pointRadius:0,
-    pointHoverRadius:6,
-    pointHoverBackgroundColor:'#ff0080',
-    pointHoverBorderColor:'#fff'
+    pointRadius:0
   }]},
   options:{
     responsive:true,
     animation:{duration:300},
     scales:{
-      x:{ticks:{color:'#666',maxTicksLimit:6,font:{family:'Orbitron'}},grid:{color:'rgba(255,107,0,.05)'}},
-      y:{min:0,max:65535,ticks:{color:'#666',font:{family:'Orbitron'}},grid:{color:'rgba(255,107,0,.05)'}}
+      x:{ticks:{color:'#5a2818',maxTicksLimit:6},grid:{color:'rgba(138,72,40,.1)'}},
+      y:{min:0,max:65535,ticks:{color:'#5a2818'},grid:{color:'rgba(138,72,40,.1)'}}
     },
     plugins:{legend:{display:false}}
   }
@@ -778,15 +920,15 @@ async function applyTimer(){
   let r=await fetch('/set_timer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({duration:total})});
   let j=await r.json();
   let msg=document.getElementById('timerMsg');
-  msg.style.color=j.ok?'#0f0':'#f44';
-  msg.textContent=j.ok?'✅ 타이머 적용! 가스 감지 시 자동 시작':'❌ 실패';
+  msg.style.color=j.ok?'#2e5e0e':'#7e0e0e';
+  msg.textContent=j.ok?'✅ 적용! 가스 감지 시 자동 시작':'❌ 실패';
   setTimeout(()=>msg.textContent='',3000);
 }
 
 async function stopTimer(){
   await fetch('/stop_timer',{method:'POST'});
   let msg=document.getElementById('timerMsg');
-  msg.style.color='#f44';
+  msg.style.color='#7e0e0e';
   msg.textContent='⏹ 타이머 중지됨';
   setTimeout(()=>msg.textContent='',3000);
 }
@@ -796,8 +938,8 @@ async function applyThresh(){
   let r=await fetch('/set_thresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   let j=await r.json();
   let msg=document.getElementById('threshMsg');
-  msg.style.color=j.ok?'#0f0':'#f44';
-  msg.textContent=j.ok?'✅ 임계값 적용됨!':'❌ 실패';
+  msg.style.color=j.ok?'#2e5e0e':'#7e0e0e';
+  msg.textContent=j.ok?'✅ 비법 적용됨!':'❌ 실패';
   if(j.ok){curTH=data;threshLoaded=true;}
   setTimeout(()=>msg.textContent='',3000);
 }
@@ -826,20 +968,15 @@ async function fetchData(){
     let pct=Math.min(100,v/65535*100);
     let gbi=document.getElementById('gBI');
     gbi.style.width=pct+'%';
-    if(v<curTH.cook)gbi.style.background='linear-gradient(90deg,#0f0,#0a0)';
-    else if(v<curTH.warn)gbi.style.background='linear-gradient(90deg,#fa0,#c80)';
-    else gbi.style.background='linear-gradient(90deg,#f44,#a00)';
+    if(v<curTH.cook)gbi.style.background='linear-gradient(90deg,#5a8a3a,#8aba5a)';
+    else if(v<curTH.warn)gbi.style.background='linear-gradient(90deg,#c08838,#e0a858)';
+    else gbi.style.background='linear-gradient(90deg,#a02818,#c04838)';
 
     let sb=document.getElementById('sB');
     let state=j.state,remaining=j.remaining,duration=j.duration;
-    let body=document.body;
-    body.classList.remove('alert-pulse');
 
-    if(state==='danger'){
-      sb.textContent='🚨 위험!';sb.className='badge b2';
-      body.classList.add('alert-pulse');
-    }
-    else if(state==='gas_warn'){sb.textContent='⚠ 가스주의';sb.className='badge b5';}
+    if(state==='danger'){sb.textContent='🚨 위험!';sb.className='badge b2';}
+    else if(state==='gas_warn'){sb.textContent='⚠️ 주의';sb.className='badge b5';}
     else if(state==='done'){sb.textContent='⏰ 종료!';sb.className='badge b4';}
     else if(state==='timer_warn'){sb.textContent='⏰ 임박!';sb.className='badge b1';}
     else if(state==='running'){sb.textContent='🍳 요리중';sb.className='badge b3';}
@@ -871,11 +1008,11 @@ setInterval(()=>{
   document.querySelectorAll('.led-dot').forEach(d=>{
     if(d.classList.contains('led-on-y')||d.classList.contains('led-on-r')){
       d.style.opacity=bl?'1':'.2';
-    }else{
-      d.style.opacity='1';
-    }
+    }else{d.style.opacity='1';}
   });
 },150);
+
+updateNav();
 </script>
 </body>
 </html>"""
@@ -1001,7 +1138,6 @@ def main():
             print(f"서버 오류: {e}")
 
         now = time.ticks_ms()
-
         if time.ticks_diff(now, last_led) >= 100:
             last_led = now
             update_led()
